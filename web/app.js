@@ -22,16 +22,19 @@
   const COAST_OVER_TILES = {color: '#b6c9d0', weight: 0, fillOpacity: 0};
   const sea = L.layerGroup().addTo(map);
 
-  let cells = new Map(), hot = [], meta = {}, area = null;
-  const key = (la, lo) => `${Math.floor((la - area.south) / meta.cell_deg)}|${Math.floor((lo - area.west) / meta.cell_deg)}`;
+  let cells = new Map(), hot = [], meta = {}, area = null, cellDeg = .01;
+  const key = (la, lo) => `${Math.floor((la - area.south) / cellDeg)}|${Math.floor((lo - area.west) / cellDeg)}`;
+  const CLASSES = [[.9, 'Highest'], [.77, 'High'], [.62, 'Good'], [.47, 'Medium'], [.32, 'Low']];
+  const VIEWS = {south: [[17.45, -77.45], [18.0, -76.25]], east: [[17.3, -76.6], [18.8, -75.4]],
+                 north: [[18.2, -78.6], [18.8, -76.6]], all: [[16.6, -78.9], [19.2, -75.2]]};
 
   async function getJSON(u) { const r = await fetch(u, {cache: 'no-cache'}); if (!r.ok) throw Error(u + ' ' + r.status); return r.json(); }
 
   async function load() {
     const [coast, grid, top, rel, m, banks] = await Promise.all([
-      getJSON('coast.geojson'), getJSON('grid.geojson'), getJSON('top-spots.json'),
+      getJSON('coast.geojson'), getJSON('grid.json'), getJSON('top-spots.json'),
       getJSON('releases.json').catch(() => []), getJSON('meta.json'), getJSON('banks.json').catch(() => [])]);
-    meta = m; area = m.area;
+    meta = m; area = grid.area; cellDeg = grid.cell;
     const built = new Date(m.built_utc);
     $('built').textContent = `Built ${built.toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'})}` +
       (m.chlorophyll_date ? ` · chlorophyll ${m.chlorophyll_date}` : '') + (Date.now() - built > 18 * 3600e3 ? ' · may be out of date' : '');
@@ -39,19 +42,23 @@
       ` · weights ${Object.entries(m.weights || {}).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(', ')}` + ` · ${m.releases_used} releases`;
 
     coastLayer = L.geoJSON(coast, {interactive: false, style: tiles ? COAST_OVER_TILES : COAST_PLAIN}).addTo(sea);
-    L.geoJSON(grid, {
-      style: f => ({stroke: false, fillColor: COLORS[f.properties.cls], fillOpacity: OPAC[f.properties.cls]}),
-      onEachFeature: (f, layer) => {
-        const p = f.properties; cells.set(key(p.lat, p.lon), p); if (p.score >= .77) hot.push(p);
-        layer.on('click', () => layer.bindPopup(explain(p)).openPopup());
-      }
-    }).addTo(sea);
+    const canvas = L.canvas({padding: .3});
+    const n = v => v < 0 ? null : v / 10;
+    for (const r of grid.rows) {
+      const [i, j, s1000, depth, drop, front, zoo, conv, rel] = r, score = s1000 / 1000;
+      const la = area.south + (i + .5) * cellDeg, lo = area.west + (j + .5) * cellDeg;
+      const p = {score, cls: CLASSES.find(c => score >= c[0])[1], lat: la, lon: lo, depth_m: depth < 0 ? null : depth, drop: drop / 100,
+                 front_nm: n(front), zoo_nm: n(zoo), conv_nm: n(conv), release_nm: n(rel)};
+      cells.set(`${i}|${j}`, p); if (score >= .77) hot.push(p);
+      L.rectangle([[la - cellDeg / 2, lo - cellDeg / 2], [la + cellDeg / 2, lo + cellDeg / 2]],
+        {renderer: canvas, stroke: false, fillColor: COLORS[p.cls], fillOpacity: OPAC[p.cls]}).on('click', ev => L.popup().setLatLng(ev.latlng).setContent(explain(p)).openOn(map)).addTo(sea);
+    }
     banks.forEach(b => L.circleMarker([b.lat, b.lon], {radius: 3.5, color: '#fff', weight: 1, fillColor: '#e8475f', fillOpacity: 1, interactive: false}).addTo(sea));
     rel.forEach(r => L.marker([r.lat, r.lon], {icon: L.divIcon({className: '', html: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="#00e5ff" stroke="#061b33" stroke-width="1.5"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11]}),
       title: 'Release ' + r.date.slice(0, 10)}).bindPopup(`Release ${esc(r.date.slice(0, 10))}<br>${pos2txt(r.lat, r.lon)}${r.note ? '<br>' + esc(r.note) : ''}`).addTo(sea));
-    top.forEach(t => L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: 'Top ' + t.rank, zIndexOffset: 500})
-      .bindPopup(`<b>Top ${t.rank}</b><br>${pos2txt(t.lat, t.lon)}<br>Score ${t.score.toFixed(2)}`).addTo(sea));
-    if (grid.features.length) map.fitBounds(L.geoJSON(grid).getBounds().pad(.05), {maxZoom: 12});
+    top.forEach(t => L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: `${t.region || ''} top ${t.rank}`, zIndexOffset: 500})
+      .bindPopup(`<b>${esc(t.region || '')} · top ${t.rank}</b><br>${pos2txt(t.lat, t.lon)}<br>Score ${t.score.toFixed(2)}`).addTo(sea));
+    const v = store.get('sil.view', 'south'); $('areaSel').value = v; map.fitBounds(VIEWS[v] || VIEWS.south);
     drawMyLogs();
   }
 
@@ -161,11 +168,12 @@
       ? `<b>${s.high_plus} of ${s.scored}</b> scored strikes were in <b>High or Highest</b> squares, which cover about <b>${pct(sh.high_plus)}</b> of the grid area. ` +
         `<b>${s.good_plus} of ${s.scored}</b> were Good or better (${pct(sh.good_plus)} of the area).` +
         (t.quiet.scored ? ` Quiet logs: ${t.quiet.below_good} of ${t.quiet.scored} were in squares below Good.` : '') +
-        (t.not_scored ? ` <span class="small">(${t.not_scored} log${t.not_scored > 1 ? 's' : ''} not counted)</span>` : '')
+        (t.not_scored ? ` <span class="small">(${t.not_scored} log${t.not_scored > 1 ? 's' : ''} not counted)</span>` : '') +
+        (t.by_region ? '<br><span class="small">' + Object.entries(t.by_region).filter(([, r]) => r.scored).map(([k, r]) => `${esc(k)}: ${r.high_plus} of ${r.scored}`).join(' · ') + '</span>' : '')
       : `Collecting. ${t.snapshots} grid${t.snapshots === 1 ? '' : 's'} saved so far; logs made from now on will be scored against them.` +
         (t.not_scored ? ` ${t.not_scored} earlier log${t.not_scored > 1 ? 's' : ''} not counted.` : '');
     $('trackList').innerHTML = t.entries.slice(-12).reverse().map(e =>
-      `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count} · ` +
+      `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count}${e.region ? ' · ' + esc(e.region) : ''} · ` +
       (e.scored ? `<b>${esc(e.cls)}</b> (${e.score.toFixed(2)})` : 'not counted') + '</li>').join('');
   }
   $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
@@ -176,6 +184,8 @@
     try { if (navigator.share) { await navigator.share({title: 'Strike grid logs', text}); return; } } catch (e) { if (e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
   });
+
+  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
 
   // ---------- sheets / tiles
   function sheet(btn, el) { const open = el.hidden; document.querySelectorAll('.sheet').forEach(s => s.hidden = true);

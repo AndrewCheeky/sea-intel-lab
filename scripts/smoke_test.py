@@ -13,7 +13,7 @@ async def main():
         pg.on('pageerror', lambda e: errs.append(str(e)))
         await pg.goto('http://127.0.0.1:8765/index.html', wait_until='networkidle'); await pg.wait_for_timeout(1500)
         built = await pg.inner_text('#built')
-        squares = await pg.evaluate("document.querySelectorAll('.leaflet-overlay-pane canvas, .leaflet-overlay-pane path').length")
+        squares = await pg.evaluate("document.querySelectorAll('.leaflet-overlay-pane canvas').length")
         spots = await pg.evaluate("document.querySelectorAll('.spot').length")
         await pg.click('#boatBtn'); await pg.wait_for_timeout(1500)
         here = await pg.inner_text('#here'); best = await pg.inner_text('#best')
