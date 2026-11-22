@@ -233,7 +233,10 @@
     const v = $('shareDlg').returnValue; if (!SHARE_TXT[v]) return;
     if (!store.get(CODE, '')) return toast('Enter your boat code first');
     const j = await shareCall(v);
-    toast(j && j.ok ? `Sharing: ${SHARE_TXT[j.share]} – applies to every phone on ${j.boat || 'your boat'}` : j ? 'Not changed: ' + (j.error || 'unknown') : 'No signal – try again when connected');
+    toast(j && j.ok && j.share ? `Sharing: ${SHARE_TXT[j.share]} – applies to every phone on ${j.boat || 'your boat'}`
+      : j && (j.ok || /position|count/.test(j.error || '')) ? 'Not saved yet – the logging script needs updating (StrikeLog.gs)'
+      : j && /code/.test(j.error || '') ? 'Not saved – boat code not accepted'
+      : j ? 'Not saved: ' + (j.error || 'unknown') : 'Not saved – no signal, try again when connected');
   });
   $('shareBtn').addEventListener('click', () => askSharing());
   $('codeBtn').addEventListener('click', async () => {
