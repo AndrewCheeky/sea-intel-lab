@@ -23,7 +23,7 @@ DATA = ROOT / 'data'
 BASE = os.getenv('SOURCE_SITE', 'https://andrewcheeky.github.io/jamaica-marine-currents/').rstrip('/') + '/'
 
 # Area scored (south coast around Kingston); cell size in degrees (~0.6 NM)
-AREA = dict(west=-77.40, east=-76.40, south=17.30, north=18.00)
+AREA = dict(west=-77.40, east=-76.20, south=17.30, north=18.00)
 CELL = 0.01
 WEIGHTS = dict(drop=.30, front=.30, release=.20, zoo=.15, conv=.05)
 SIGMA_NM = dict(drop=2.0, front=2.5, release=3.0, zoo=2.5, conv=3.0)
@@ -131,7 +131,7 @@ def read_depth():
     """ETOPO 1-arc-minute depth from NOAA ERDDAP; returns (depth_m positive down, slope m/km) on the grid."""
     q = (f"altitude%5B({AREA['south'] - .05}):1:({AREA['north'] + .05})%5D"
          f"%5B({AREA['west'] - .05}):1:({AREA['east'] + .05})%5D")
-    cache = ROOT / 'cache' / 'etopo.csv'                 # depth never changes: fetch once, then reuse (kept by actions/cache)
+    cache = ROOT / 'cache' / 'etopo_{west}_{east}_{south}_{north}.csv'.format(**AREA)                # depth never changes: fetch once, then reuse (kept by actions/cache)
     if cache.exists() and cache.stat().st_size > 1000:
         txt = cache.read_text()
     else:
@@ -248,6 +248,7 @@ def main():
         i, j = np.unravel_index(k, score.shape)
         la, lo = float(GLAT[i, j]), float(GLON[i, j])
         if score[i, j] < .5: break
+        if i < 2 or j < 2 or i >= score.shape[0] - 2 or j >= score.shape[1] - 2: continue   # skip the area's edges
         if all(nm_between(la, lo, t['lat'], t['lon']) > 2.0 for t in top):
             top.append(dict(rank=len(top) + 1, lat=la, lon=lo, score=round(float(score[i, j]), 3)))
         if len(top) == 5: break
