@@ -154,6 +154,17 @@
   const isToday = t => new Date(t).toDateString() === new Date().toDateString();
   const outcomeOf = note => { const m = /^\[([A-Za-z ,]+)\]\s*/.exec(note || ''); return m && m[1] !== 'seen' ? m[1] : ''; };
   const noteText = note => String(note || '').replace(/^\[[A-Za-z ,]+\]\s*/, '');
+  // Crew on the same boat see each other's logs (fetched with the boat code, kept for offline use)
+  const teamLogs = () => { const t = store.get('sil.team', null); return t && t.code === curCode() ? t.logs : []; };
+  async function loadTeam() {
+    const code = curCode(); if (!code || !navigator.onLine) return;
+    try {
+      const j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'team', code})}`, {cache: 'no-store'})).json();
+      if (j && j.ok && Array.isArray(j.logs)) { store.set('sil.team', {code, logs: j.logs}); if (j.share) store.set('sil.share', j.share); drawMyLogs(); drawSightings(); }
+    } catch {}
+  }
+  setTimeout(loadTeam, 2500); setInterval(loadTeam, 300000); window.addEventListener('online', loadTeam);
+
   function drawMyLogs() {
     myLayer.clearLayers(); const logs = boatLogs();
     const hidden = new Set(store.get(HIDDEN, [])), mineKeys = new Set(), mineIds = new Set(logs.map(l => l.id).filter(Boolean));
@@ -166,6 +177,14 @@
         ? L.circleMarker([l.lat, l.lon], {pane: 'pins', renderer: pinRenderer, radius: 6, color: '#061b33', weight: 2, fillColor: '#9aa5b1', fillOpacity: 1})
         : L.marker([l.lat, l.lon], {icon: star(isToday(l.time) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 700})).bindPopup(pop).addTo(myLayer);
     });
+    const boatName = store.get('sil.boat', '') || 'your boat';
+    for (const r of teamLogs()) {
+      if (SIGHT.includes(r.species) || mineIds.has(r.id) || hidden.has('id:' + r.id) || r.count === 0 || r.species === 'No strikes here') continue;
+      mineIds.add(r.id); mineKeys.add(logKey(r.date, r.lat));
+      L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 680})
+        .bindPopup(`<b>${esc(r.species)}${r.count > 1 ? ' × ' + r.count : ''}</b>${outcomeOf(r.note) ? ' · ' + esc(outcomeOf(r.note)) : ''}<br>${esc(boatName)} <small>(crew)</small><br>` +
+          `${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(r.lat, r.lon)}${noteText(r.note) ? '<br>' + esc(noteText(r.note)) : ''}`).addTo(myLayer);
+    }
     for (const r of pubStrikes) {
       const k = logKey(r.date, r.lat); if (mineKeys.has(k) || hidden.has(k) || (r.id && (mineIds.has(r.id) || hidden.has('id:' + r.id)))) continue;
       L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 650, title: 'Strike ' + r.date.slice(0, 10)})
@@ -174,7 +193,7 @@
     const waiting = logs.filter(l => !l.synced).length;   // logs = this boat's only
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
     $('codeState').textContent = store.get(CODE, '') ? (store.get('sil.boat', '') || 'set') : 'not set';
-    $('shareState').textContent = SHARE_TXT[store.get('sil.share', '')] || 'not chosen';
+    $('shareState').textContent = SHARE_TXT[store.get('sil.share', '') || 'research'];
   }
   let pendingPos = null;
   function needCode() {
@@ -221,17 +240,17 @@
         let j = null;
         try { const r = await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }       // no signal: try later
         const current = l.code === curCode();
-        if (j && j.ok && 'share' in j && current) { store.set('sil.share', j.share || ''); if (!j.share && !askSharing.done) { askSharing.done = true; askSharing(); } }
+        if (j && j.ok && j.share && current) store.set('sil.share', j.share);
         if (j && j.ok) { const all = store.get(LOGS, []); const m = all.find(x => x.id === l.id); if (m) m.synced = true; store.set(LOGS, all); }
         else if (j && /code/.test(j.error || '')) { if (current) toast('Boat code not accepted – check it under More'); continue; }
         else if (j) { if (current) toast('Not sent: ' + (j.error || 'unknown')); break; }
       }
-    } finally { sending = false; drawMyLogs(); }
+    } finally { sending = false; drawMyLogs(); loadTeam(); }
   }
   window.addEventListener('online', sendPending);
   setInterval(sendPending, 120000);
   // ---------- boat code and sharing (per boat: research only / general area / everything)
-  const SHARE_TXT = {research: 'Research only', bank: 'Tournament Mode', all: 'Everything'};
+  const SHARE_TXT = {research: 'Research (crew only)', bank: 'Tournament Mode', all: 'Everything'};
   async function shareCall(level) {
     const code = store.get(CODE, ''); if (!code) return null;
     const q = new URLSearchParams({action: 'strikelog', op: 'share', code}); if (level) q.set('level', level);
@@ -240,7 +259,7 @@
   }
   function askSharing() {
     $('shareBoat').textContent = store.get('sil.boat', '') ? `for ${store.get('sil.boat', '')}` : '';
-    const cur = store.get('sil.share', ''); document.querySelectorAll('#shareDlg [value]').forEach(b => b.classList.toggle('chosen', b.value === cur));
+    const cur = store.get('sil.share', '') || 'research'; document.querySelectorAll('#shareDlg [value]').forEach(b => b.classList.toggle('chosen', b.value === cur));
     $('shareDlg').showModal();
   }
   $('shareDlg').addEventListener('close', async () => {
@@ -261,7 +280,7 @@
   $('codeBtn').addEventListener('click', openCode);
   async function useCode(code, boat, share) {
     store.set(CODE, code); store.set('sil.boat', boat || ''); store.set('sil.share', share || ''); drawMyLogs(); drawSightings(); sendPending();
-    if (!share) askSharing();                                        // first use on this boat: ask for consent
+    loadTeam();
   }
   $('joinBtn').addEventListener('click', async () => {
     const code = $('codeIn').value.trim().toUpperCase(); if (!code) return toast('Type the code your captain gave you');
@@ -280,13 +299,13 @@
     if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Creating codes needs the updated logging script (StrikeLog.gs)' : 'Not created: ' + (j.error || 'unknown'));
     $('dupMsg').hidden = true;
     $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCode').hidden = false;
-    store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', ''); drawMyLogs(); drawSightings();
+    store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', j.share || 'research'); drawMyLogs(); drawSightings();
   });
   $('shareCodeBtn').addEventListener('click', async () => {
     const text = `Boat code for ${$('newBoatTxt').textContent} on the Marlin strike grid: ${$('newCodeTxt').textContent}\n${location.origin + location.pathname}\n(Open it, More → Boat code → Join)`;
     try { if (navigator.share) await navigator.share({text}); else { await navigator.clipboard.writeText(text); toast('Copied – paste it to your crew'); } } catch {}
   });
-  $('codeDoneBtn').addEventListener('click', () => { $('codeDlg').close(); if (!store.get('sil.share', '')) askSharing(); });
+  $('codeDoneBtn').addEventListener('click', () => { $('codeDlg').close(); });
   $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); drawSightings(); $('codeDlg').close(); });;
 
   // ---------- track record
@@ -327,6 +346,8 @@
     sightLayer.clearLayers();
     let list = []; try { list = await getJSON('sightings.json'); } catch {}
     const mine = boatLogs().filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l, id: l.id}));
+    const team = teamLogs().filter(r => SIGHT.includes(r.species) && !mine.some(m => m.id === r.id)).map(r => ({date: r.date, lat: r.lat, lon: r.lon, what: r.species, id: r.id, boat: (store.get('sil.boat', '') || 'your boat') + ' (crew)'}));
+    mine.push(...team);
     const mineIds = new Set(mine.map(m => m.id).filter(Boolean));
     const seen = new Set(store.get(HIDDEN, []).map(k => k));
     for (const s of [...mine, ...list]) {
