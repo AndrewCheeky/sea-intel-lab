@@ -140,7 +140,7 @@ def read_depth():
             qq = (f"altitude%5B({lat0:.2f}):1:({lat1:.2f})%5D%5B({AREA['west'] - .05}):1:({AREA['east'] + .05})%5D")
             for host in ('coastwatch.pfeg.noaa.gov', 'upwell.pfeg.noaa.gov'):
                 try:
-                    t = fetch(f'https://{host}/erddap/griddap/etopo180.csv?' + qq, timeout=90, tries=2).decode(); break
+                    t = fetch(f'https://{host}/erddap/griddap/etopo180.csv?' + qq, timeout=90, tries=1).decode(); break
                 except Exception as e:
                     t = None; last = e
             if t is None: raise last
@@ -211,6 +211,26 @@ def read_logs():
 def is_strike(r): return r['count'] > 0 and r['species'] != 'No strikes here'
 
 
+def read_depth_contours():
+    """Natural Earth 10m bathymetry: points along the 200 m and 1000 m depth lines (cached in cache/)."""
+    cache = ROOT / 'cache' / 'ne_contours_{west}_{east}_{south}_{north}.json'.format(**AREA)
+    if cache.exists(): return json.loads(cache.read_text())
+    out = {}
+    for name, depth in (('ne_10m_bathymetry_K_200', 200), ('ne_10m_bathymetry_J_1000', 1000)):
+        gj = json.loads(fetch(f'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/{name}.geojson', timeout=180))
+        pts = []
+        for f in gj['features']:
+            g = f['geometry']; polys = g['coordinates'] if g['type'] == 'MultiPolygon' else [g['coordinates']]
+            for poly in polys:
+                for ring in poly:
+                    for x, y in ring:
+                        if AREA['west'] - .5 < x < AREA['east'] + .5 and AREA['south'] - .5 < y < AREA['north'] + .5:
+                            pts.append((round(y, 4), round(x, 4)))
+        out[str(depth)] = pts
+    cache.parent.mkdir(exist_ok=True); cache.write_text(json.dumps(out))
+    return out
+
+
 def read_releases(logs):
     now = datetime.now(timezone.utc)
     out = []
@@ -256,8 +276,16 @@ def main():
         s_drop = gaussian_filter(s_drop, 1.2); s_drop /= max(s_drop.max(), 1e-6)
         sources['depth'] = 'ETOPO 1 arc-minute (NOAA ERDDAP)'
     except Exception as e:
-        log('depth unavailable, using approximate drop-off line:', e)
-        s_drop = gauss(dist_to_lines([DROP_FALLBACK]), SIGMA_NM['drop']); sources['depth'] = 'approximate drop-off line (Navionics chart)'
+        log('ETOPO depth unavailable:', e)
+        try:
+            c = read_depth_contours()
+            d200, d1000 = dist_to_points(c['200']), dist_to_points(c['1000'])
+            s_drop = .5 * gauss(d200, 2.0) + .5 * gauss(d1000, 2.5)        # the shelf edge and the steep slope below it
+            s_drop /= max(s_drop.max(), 1e-6)
+            sources['depth'] = 'Natural Earth 200 m / 1000 m depth lines'
+        except Exception as e2:
+            log('depth lines unavailable, using approximate drop-off line:', e2)
+            s_drop = gauss(dist_to_lines([DROP_FALLBACK]), SIGMA_NM['drop']); sources['depth'] = 'approximate drop-off line (Navionics chart, south coast only)'
     # releases
     logs = read_logs()
     rel = read_releases(logs)

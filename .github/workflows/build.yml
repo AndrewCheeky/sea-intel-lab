@@ -35,7 +35,7 @@ jobs:
             git fetch --depth 1 origin history && git worktree add history FETCH_HEAD
           fi
       - name: Reuse depth saved in the history branch
-        run: mkdir -p cache && cp history/depth/*.csv cache/ 2>/dev/null || true
+        run: mkdir -p cache && cp history/depth/* cache/ 2>/dev/null || true
       - name: Build grid
         env:
           STRIKELOG_URL: ${{ secrets.STRIKELOG_URL }}
@@ -57,7 +57,7 @@ jobs:
           ts=$(date -u +%Y%m%dT%H%MZ)
           if [ ! -e history/.git ]; then git worktree add --orphan -b history history; fi
           mkdir -p history/grids history/depth && cp site/snapshot.json history/grids/$ts.json
-          cp cache/*.csv history/depth/ 2>/dev/null || true
+          cp cache/*.csv cache/*.json history/depth/ 2>/dev/null || true
           cd history
           git add grids depth
           git -c user.name="sea-intel-lab bot" -c user.email="noreply@github.com" commit -qm "Grid $ts" || exit 0
