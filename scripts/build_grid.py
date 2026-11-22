@@ -34,7 +34,7 @@ SIGHT_BONUS = .12          # birds / bait / weed seen recently (fades quickly)
 SIGHT_HALF_LIFE_H = 6
 SIGHTINGS = ('Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log')
 # Reference spots for the "best times" strip (tides and current turns)
-TIME_POINTS = {'south': (17.70, -76.88), 'east': (17.85, -76.15), 'north': (18.55, -77.60)}
+TIME_POINTS = {'south': (17.70, -76.88), 'morant': (17.42, -75.98), 'portland': (18.20, -76.30), 'north': (18.55, -77.60)}
 COS = math.cos(math.radians(17.7))
 # Map image layout of chlorophyll-latest.png (fixed by the source site's composite.py)
 MAP_EXTENT = (-79.5, -74.5, 16.0, 20.0)
@@ -205,13 +205,14 @@ def read_depth():
 
 
 # Regions for top spots and the track record: a square belongs to the region of its nearest bank
-REGIONS = ['South coast', 'East & north-east', 'North & west']
+REGIONS = ['South coast', 'Morant Cays', 'Portland', 'North & west']
 BANK_REACH_NM = 35          # squares further than this from every bank are not scored
 BANKS = []
 
 
 def bank_region(b):
-    if b['lon'] >= -76.3: return 'East & north-east'
+    if b['lat'] < 17.7 and b['lon'] >= -76.3: return 'Morant Cays'
+    if b['lat'] >= 17.95 and b['lon'] >= -76.9: return 'Portland'
     if b['lat'] < 17.98 and b['lon'] > -77.7: return 'South coast'
     return 'North & west'
 
