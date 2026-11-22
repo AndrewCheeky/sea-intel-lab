@@ -185,7 +185,8 @@ def read_depth():
             lat0 = lat1
         txt = '\n'.join(parts)
         cache.parent.mkdir(exist_ok=True); cache.write_text(txt)
-    rows = list(csv.reader(io.StringIO(txt)))[2:]
+    rows = [r for r in csv.reader(io.StringIO(txt)) if len(r) >= 3]
+    rows = [r for r in rows if r[0] not in ("latitude", "degrees_north")]   # band headers
     lat = np.array(sorted({float(r[0]) for r in rows})); lon = np.array(sorted({float(r[1]) for r in rows}))
     z = np.full((len(lat), len(lon)), np.nan)
     li = {v: i for i, v in enumerate(lat)}; lj = {v: j for j, v in enumerate(lon)}
