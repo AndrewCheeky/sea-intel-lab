@@ -187,6 +187,25 @@
 
   $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
 
+  // ---------- depth contours (on/off, remembered)
+  const DEPTH_COLORS = {100: '#9fe7ff', 200: '#5cc8ff', 500: '#2f9be0', 1000: '#2470c2', 2000: '#5a4fcf'};
+  let contourLayer = null;
+  async function showContours(on) {
+    store.set('sil.contours', on);
+    if (!on) { if (contourLayer) { map.removeLayer(contourLayer); } return; }
+    if (!contourLayer) {
+      let gj; try { gj = await getJSON('contours.geojson'); } catch { toast('Depth contours not available yet'); $('contours').checked = false; return; }
+      const levels = [...new Set(gj.features.map(f => f.properties.depth_m))].sort((a, b) => a - b);
+      contourLayer = L.geoJSON(gj, {interactive: true,
+        style: f => ({color: DEPTH_COLORS[f.properties.depth_m] || '#5cc8ff', weight: f.properties.depth_m === 200 ? 1.8 : 1.2, opacity: .9, dashArray: f.properties.depth_m >= 1000 ? '5 4' : null}),
+        onEachFeature: (f, l) => l.bindTooltip(`${f.properties.depth_m} m (${Math.round(f.properties.depth_m * 3.281)} ft)`, {sticky: true})});
+      contourLayer.bindPopup(`Depth lines: ${levels.join(', ')} m<br><small>${esc((gj.properties || {}).source || '')} · approximate, not soundings</small>`);
+    }
+    contourLayer.addTo(map);
+  }
+  $('contours').addEventListener('change', e => showContours(e.target.checked));
+  if (store.get('sil.contours', false)) { $('contours').checked = true; showContours(true); }
+
   // ---------- sheets / tiles
   function sheet(btn, el) { const open = el.hidden; document.querySelectorAll('.sheet').forEach(s => s.hidden = true);
     document.querySelectorAll('[aria-expanded]').forEach(b => b.setAttribute('aria-expanded', 'false')); el.hidden = !open; btn.setAttribute('aria-expanded', open); }

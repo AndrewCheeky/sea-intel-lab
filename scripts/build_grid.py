@@ -211,24 +211,60 @@ def read_logs():
 def is_strike(r): return r['count'] > 0 and r['species'] != 'No strikes here'
 
 
-def read_depth_contours():
-    """Natural Earth 10m bathymetry: points along the 200 m and 1000 m depth lines (cached in cache/)."""
-    cache = ROOT / 'cache' / 'ne_contours_{west}_{east}_{south}_{north}.json'.format(**AREA)
+NE_DEPTHS = (('ne_10m_bathymetry_K_200', 200), ('ne_10m_bathymetry_J_1000', 1000), ('ne_10m_bathymetry_I_2000', 2000))
+
+
+def read_depth_lines():
+    """Natural Earth 10m bathymetry depth lines (200, 1000, 2000 m) inside the area, as [[lat, lon], ...] lines (cached)."""
+    cache = ROOT / 'cache' / 'ne_lines_{west}_{east}_{south}_{north}.json'.format(**AREA)
     if cache.exists(): return json.loads(cache.read_text())
     out = {}
-    for name, depth in (('ne_10m_bathymetry_K_200', 200), ('ne_10m_bathymetry_J_1000', 1000)):
+    inside = lambda x, y: AREA['west'] - .3 < x < AREA['east'] + .3 and AREA['south'] - .3 < y < AREA['north'] + .3
+    for name, depth in NE_DEPTHS:
         gj = json.loads(fetch(f'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/{name}.geojson', timeout=180))
-        pts = []
+        lines = []
         for f in gj['features']:
             g = f['geometry']; polys = g['coordinates'] if g['type'] == 'MultiPolygon' else [g['coordinates']]
             for poly in polys:
                 for ring in poly:
+                    cur = []
                     for x, y in ring:
-                        if AREA['west'] - .5 < x < AREA['east'] + .5 and AREA['south'] - .5 < y < AREA['north'] + .5:
-                            pts.append((round(y, 4), round(x, 4)))
-        out[str(depth)] = pts
-    cache.parent.mkdir(exist_ok=True); cache.write_text(json.dumps(out))
+                        if inside(x, y): cur.append([round(y, 4), round(x, 4)])
+                        elif cur:
+                            if len(cur) > 1: lines.append(cur)
+                            cur = []
+                    if len(cur) > 1: lines.append(cur)
+        out[str(depth)] = lines
+    cache.parent.mkdir(exist_ok=True); cache.write_text(json.dumps(out, separators=(',', ':')))
     return out
+
+
+def read_depth_contours():
+    """Points along the 200 m and 1000 m lines, for the drop-off score."""
+    L = read_depth_lines()
+    return {k: [p for line in L[k] for p in line] for k in ('200', '1000')}
+
+
+def contours_geojson(depth=None):
+    """Depth lines for the map's on/off switch: from ETOPO when available (100–2000 m), else Natural Earth."""
+    feats = []
+    if depth is not None:
+        import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+        levels = [100, 200, 500, 1000, 2000]
+        cs = plt.contour(GLON, GLAT, np.nan_to_num(depth, nan=-1), levels=levels)
+        for lev, segs in zip(levels, cs.allsegs):
+            for seg in segs:
+                if len(seg) < 4: continue
+                feats.append({'type': 'Feature', 'properties': {'depth_m': lev},
+                              'geometry': {'type': 'LineString', 'coordinates': [[round(float(x), 4), round(float(y), 4)] for x, y in seg[::2]]}})
+        plt.close('all'); src = 'ETOPO 1 arc-minute'
+    else:
+        for k, lines in read_depth_lines().items():
+            for line in lines:
+                feats.append({'type': 'Feature', 'properties': {'depth_m': int(k)},
+                              'geometry': {'type': 'LineString', 'coordinates': [[p[1], p[0]] for p in line[::2] + line[-1:]]}})
+        src = 'Natural Earth 10m (generalised)'
+    return {'type': 'FeatureCollection', 'properties': {'source': src}, 'features': feats}
 
 
 def read_releases(logs):
@@ -375,6 +411,10 @@ def main():
     (OUT / 'meta.json').write_text(json.dumps(meta, indent=1))
     (OUT / 'coast.geojson').write_text(json.dumps(coast, separators=(',', ':')))
     if banks_raw: (OUT / 'banks.json').write_bytes(banks_raw)
+    try:
+        (OUT / 'contours.geojson').write_text(json.dumps(contours_geojson(depth), separators=(',', ':')))
+    except Exception as e:
+        log('depth lines for the map unavailable:', e)
     write_kml(feats, top, rel, meta); write_gpx(top, rel)
     # this build's grid, kept for the track record (scores ×1000 for every shaded square)
     ocean = int(np.count_nonzero(score > 0))
