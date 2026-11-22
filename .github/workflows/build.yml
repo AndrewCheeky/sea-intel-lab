@@ -1,0 +1,43 @@
+name: Build strike grid
+on:
+  schedule:
+    # ~35 minutes after each Sea Intelligence map run (12:15 AM, 6:15 AM, 12:15 PM, 6:15 PM Jamaica)
+    - cron: '50 5,11,17,23 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy scipy pillow
+      - name: Build grid
+        env:
+          SOURCE_SITE: ${{ vars.SOURCE_SITE || 'https://andrewcheeky.github.io/jamaica-marine-currents/' }}
+        run: python scripts/build_grid.py
+      - name: Add the live map
+        run: cp web/* site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
