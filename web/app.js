@@ -225,43 +225,60 @@
     store.set(LOGS, logs); drawMyLogs(); drawSightings(); toast(`${v} logged`); sendPending();
   });
 
-  // ---------- best times strip: dawn/dusk (phone), tide and current turns (from the build), moon (phone, for information)
+  // ---------- best times strip: dawn/dusk and solunar periods (worked out on the phone), tide and current turns (from the build)
   const POINTS = {south: [17.70, -76.88], east: [17.85, -76.15], north: [18.55, -77.60], all: [17.70, -76.88]};
-  let timesData = null, tomorrow = false;
+  let timesData = null, tomorrow = false, BANKLIST = [];
   const hm = d => d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
-  function nearestPoint() {
-    if (last) { let best = 'south', bd = 1e9; for (const k of ['south', 'east', 'north']) { const d = nm(last, POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
-    const v = store.get('sil.view', 'south'); return v === 'all' ? 'south' : v;
+  const hspan = (a, b) => { const x = hm(a), y = hm(b), ax = x.slice(-2), by = y.slice(-2); return (ax === by && /[AP]M/i.test(ax) ? x.slice(0, -3) : x) + '–' + y; };
+  function chosenBank() {
+    const k = $('tBank').value;
+    if (k && k !== 'near') { const b = BANKLIST.find(x => x.key === k); if (b) return {bank: b, auto: false}; }
+    if (!BANKLIST.length) return {bank: null, auto: true};
+    const v = store.get('sil.view', 'south'), ref = last || POINTS[v] || POINTS.south;
+    let best = BANKLIST[0], bd = 1e9; for (const b of BANKLIST) { const d = nm(ref, [b.lat, b.lon]); if (d < bd) { bd = d; best = b; } }
+    return {bank: best, auto: true};
   }
+  function regionFor(la, lo) { let best = 'south', bd = 1e9; for (const k of ['south', 'east', 'north']) { const d = nm([la, lo], POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
   function renderTimes() {
     const now = new Date(), day = new Date(now); day.setHours(0, 0, 0, 0); if (tomorrow) day.setDate(day.getDate() + 1);
     const end = new Date(day.getTime() + 864e5), mid = new Date(day.getTime() + 432e5);
-    const pk = nearestPoint(), [la, lo] = last || POINTS[pk];
+    const {bank, auto} = chosenBank();
+    const [la, lo] = bank ? [bank.lat, bank.lon] : (last || POINTS[store.get('sil.view', 'south')] || POINTS.south), pk = regionFor(la, lo);
+    const near = $('tBank').querySelector('option[value="near"]'); if (near) near.textContent = auto && bank ? `Nearest: ${bank.name}` : 'Nearest bank';
     const sun = Sky.sunTimes(mid, la, lo);
     const win = [
-      {start: sun.dawn, end: new Date(sun.sunrise.getTime() + 36e5), label: `Dawn ${hm(sun.dawn)}–${hm(new Date(sun.sunrise.getTime() + 36e5))}`, why: 'First light to an hour after sunrise: fish often feed near the surface.'},
-      {start: new Date(sun.sunset.getTime() - 36e5), end: sun.dusk, label: `Dusk ${hm(new Date(sun.sunset.getTime() - 36e5))}–${hm(sun.dusk)}`, why: 'The last hour of sun to last light: another strong feeding time.'}];
+      {start: sun.dawn, end: new Date(sun.sunrise.getTime() + 36e5), label: `Dawn ${hspan(sun.dawn, new Date(sun.sunrise.getTime() + 36e5))}`, why: 'First light to an hour after sunrise: fish often feed near the surface.'},
+      {start: new Date(sun.sunset.getTime() - 36e5), end: sun.dusk, label: `Dusk ${hspan(new Date(sun.sunset.getTime() - 36e5), sun.dusk)}`, why: 'The last hour of sun to last light: another strong feeding time.'}];
     const items = win.map(w => ({...w, kind: 'light'}));
+    const overlaps = (x, w) => x.start < w.end && x.end > w.start;
+    let nM = 0, nm2 = 0;
+    const sol = Sky.solunar(day, la, lo).map(e => e.kind === 'major'
+      ? {...e, label: `Major ${++nM} ${hspan(e.start, e.end)}`, why: `Major feeding period: the moon is ${e.what === 'overhead' ? 'overhead' : 'underfoot'} at ${hm(e.at)}. About two hours. Strongest when it lines up with dawn, dusk or a tide turn.`}
+      : {...e, label: `Minor ${++nm2} ${hspan(e.start, e.end)}`, why: `Minor feeding period: moon${e.what} at ${hm(e.at)}. About an hour. Worth more when it falls at dawn or dusk.`});
+    for (const e of sol) { e.prime = win.some(w => overlaps(e, w)); items.push(e); }
     const P = timesData && timesData.points && timesData.points[pk];
     if (P) {
       for (const t of P.tides) { const d = new Date(t.time); if (d >= day && d < end) items.push({start: new Date(d - 27e5), end: new Date(+d + 27e5), at: d, kind: 'tide', label: `Tide ${t.type} ${hm(d)}`, why: `The tide turns (${t.type}). Bait often moves when water starts to move again.`}); }
       for (const t of P.current) { const d = new Date(t.time); if (d >= day && d < end) items.push({start: new Date(d - 27e5), end: new Date(+d + 27e5), at: d, kind: 'current', label: `Current ${t.type === 'slack' ? 'slack' : 'turns'} ${hm(d)}`, why: 'The current eases or changes direction. Strikes often come as it picks up again.'}); }
     }
-    for (const it of items) if (it.kind !== 'light') it.prime = win.some(w => it.at >= w.start && it.at <= w.end);
-    const md = Sky.moonDay(day, la, lo), il = Sky.moonIllum(mid);
-    const info = [];
-    if (md.overhead && md.overhead >= day && md.overhead < end) info.push({at: md.overhead, label: `Moon overhead ${hm(md.overhead)}`});
-    if (md.underfoot && md.underfoot >= day && md.underfoot < end) info.push({at: md.underfoot, label: `Moon underfoot ${hm(md.underfoot)}`});
+    for (const it of items) if (it.kind === 'tide' || it.kind === 'current') it.prime = [...win, ...sol].some(w => it.at >= w.start && it.at <= w.end);
     items.sort((a, b) => a.start - b.start);
     $('chips').innerHTML = items.map((it, k) => {
-      const cls = ['chip', it.prime ? 'prime' : '', now >= it.start && now <= it.end ? 'now' : '', it.end < now ? 'past' : ''].join(' ');
+      const cls = ['chip', it.kind, it.prime ? 'prime' : '', now >= it.start && now <= it.end ? 'now' : '', it.end < now ? 'past' : ''].join(' ');
       return `<button class="${cls}" data-k="${k}" title="${esc(it.why)}">${it.prime ? 'Prime · ' : ''}${esc(it.label)}</button>`;
-    }).join('') + info.map(i => `<span class="chip info" title="Moon times, for information">${esc(i.label)}</span>`).join('');
+    }).join('');
     $('chips').querySelectorAll('button.chip').forEach(b => b.addEventListener('click', () => toast(items[+b.dataset.k].why)));
+    const il = Sky.moonIllum(mid);
     $('moonLine').textContent = `${Sky.phaseName(il.phase)}, ${Math.round(il.fraction * 100)}% lit`;
   }
   function setDay(t) { tomorrow = t; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
   $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
+  $('tBank').addEventListener('change', e => { store.set('sil.bank', e.target.value); renderTimes(); });
+  getJSON('banks.json').then(bs => {
+    BANKLIST = bs.filter(b => b.name && b.lat != null && b.lon != null).sort((a, b) => a.name.localeCompare(b.name));
+    $('tBank').innerHTML = '<option value="near">Nearest bank</option>' + BANKLIST.map(b => `<option value="${esc(b.key)}">${esc(b.name)}</option>`).join('');
+    const saved = store.get('sil.bank', 'near'); $('tBank').value = BANKLIST.some(b => b.key === saved) ? saved : 'near'; renderTimes();
+  }).catch(() => {});
   getJSON('times.json').then(t => { timesData = t; renderTimes(); }).catch(() => renderTimes());
   setInterval(renderTimes, 300000);
 
