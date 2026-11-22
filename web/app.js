@@ -92,7 +92,7 @@
     const la = p.coords.latitude, lo = p.coords.longitude, here = [la, lo];
     if (p.coords.heading != null && !isNaN(p.coords.heading) && p.coords.speed > .5) heading = p.coords.heading;
     else if (last && nm(last, here) > .02) heading = bearing(last, here);
-    last = here;
+    last = here; lastFixAt = Date.now();
     if (!boat) { boat = L.marker(here, {icon: boatIcon(heading), zIndexOffset: 1000, keyboard: false}).addTo(map); acc = L.circle(here, {radius: p.coords.accuracy, weight: 1, color: '#1a73e8', fillOpacity: .08, interactive: false}).addTo(map); map.setView(here, Math.max(map.getZoom(), 12)); }
     else { boat.setLatLng(here).setIcon(boatIcon(heading)); acc.setLatLng(here).setRadius(p.coords.accuracy); }
     if (follow) map.panTo(here, {animate: true});
@@ -207,18 +207,24 @@
     $('codeState').textContent = store.get(CODE, '') ? (store.get('sil.boat', '') || 'set') : 'not set';
     $('shareState').textContent = SHARE_TXT[store.get('sil.share', '') || 'research'] + (store.get(CODE, '') && !capCode() ? ' (set by captain)' : '');
   }
-  let pendingPos = null;
+  let pendingPos = null, lastFixAt = 0;
+  // Logs always use a live GPS fix: no fix in the last 2 minutes, no logging.
+  function needGps() {
+    if (last && Date.now() - lastFixAt < 120000) return false;
+    toast('GPS is off – turn on location to log. Starting “My boat”…');
+    if (watch == null) setTimeout(() => $('boatBtn').click(), 600);
+    return true;
+  }
   function needCode() {
     if (store.get(CODE, '')) return false;
     toast('No boat code is entered on the phone'); setTimeout(openCode, 900); return true;
   }
   $('logBtn').addEventListener('click', () => {
-    if (needCode()) return;
+    if (needCode() || needGps()) return;
     pendingPos = last;
     $('species').value = 'Blue marlin'; $('count').value = 1;
     for (const id of ['oStrike', 'oLanded', 'oReleased']) $(id).checked = id === 'oStrike';
-    $('logWhere').textContent = last ? `At ${pos2txt(last[0], last[1])} (your boat).` : 'No boat position yet – it will use the centre of the map. Tap “Show my boat” first for an exact spot.';
-    if (!last) { const c = map.getCenter(); pendingPos = [c.lat, c.lng]; }
+    $('logWhere').textContent = `At ${pos2txt(last[0], last[1])} (your boat's GPS).`;
     $('logDlg').showModal();
   });
   $('species').addEventListener('change', e => { if (e.target.value === 'No strikes here') $('count').value = 0; });
@@ -229,7 +235,7 @@
     if ($('logDlg').returnValue !== 'save' || !pendingPos) return;
     const logs = store.get(LOGS, []);
     logs.push({id: newId(), code: curCode(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
-               count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: !!last, synced: false});
+               count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: true, synced: false});
     store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
     toast('Saved – sending when there is signal');
     sendPending();
@@ -389,15 +395,15 @@
   const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];
   let seenPos = null;
   $('seenBtn').addEventListener('click', () => {
-    if (needCode()) return;
-    seenPos = last; if (!last) { const c = map.getCenter(); seenPos = [c.lat, c.lng]; }
-    $('seenWhere').textContent = last ? `At ${pos2txt(last[0], last[1])} (your boat).` : 'No boat position yet – it will use the centre of the map.';
+    if (needCode() || needGps()) return;
+    seenPos = last;
+    $('seenWhere').textContent = `At ${pos2txt(last[0], last[1])} (your boat's GPS).`;
     $('seenDlg').showModal();
   });
   $('seenDlg').addEventListener('close', () => {
     const v = $('seenDlg').returnValue; if (!SIGHT.includes(v) || !seenPos) return;
     const logs = store.get(LOGS, []);
-    logs.push({id: newId(), code: curCode(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '[seen] ' + v, exact: !!last, synced: false});
+    logs.push({id: newId(), code: curCode(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '[seen] ' + v, exact: true, synced: false});
     store.set(LOGS, logs); drawMyLogs(); drawSightings(); toast(`${v} logged`); sendPending();
   });
 
