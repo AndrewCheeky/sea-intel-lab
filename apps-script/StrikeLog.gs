@@ -6,10 +6,11 @@
  * private key, scores each one against the grid that was published BEFORE it, and shows the hit rate.
  *
  * Boat codes: each boat captain creates their boat's code in the app (More → Boat code → Create) and shares
- * it with the crew. Codes are kept in the "Boats" tab of the logs sheet (Boat | Code | Sharing | Changed).
+ * it with the crew. Codes are kept in the "Boats" tab of the logs sheet (Boat | Code | Sharing | Changed | Created by).
+ * Boat names must be unique: a second request for the same name is told who created it, to ask them for the code.
  * Sharing is chosen by the boat in the app (and can be changed any time, e.g. off for a tournament):
  *   research – exact positions kept private, used only to improve the map (the default)
- *   bank     – other anglers see the species and nearest bank only
+ *   bank     – Tournament Mode: other anglers see the species, boat and nearest bank only
  *   all      – other anglers see the exact spot
  * STRIKELOG_CODE (Script Properties) still works: it becomes the first boat ("My boat").
  * STRIKELOG_READ_KEY – a long random key used only by the GitHub build to read the logs.
@@ -27,7 +28,7 @@
 const STRIKELOG = {
   SHEET_NAME: 'Strike grid logs',
   HEADER: ['Received (UTC)', 'Logged at (phone)', 'Lat', 'Lon', 'Species', 'Count', 'Note', 'Exact GPS', 'Id', 'Boat'],
-  BOATS_HEADER: ['Boat', 'Code', 'Sharing', 'Changed'],
+  BOATS_HEADER: ['Boat', 'Code', 'Sharing', 'Changed', 'Created by'],
   SHARES: ['research', 'bank', 'all'],
   SPECIES: ['Blue marlin', 'White marlin', 'Sailfish', 'Wahoo', 'Dolphin (mahi)', 'Tuna', 'No strikes here', 'Other',
             'Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'],   // last six: sightings
@@ -45,7 +46,7 @@ function strikeLogRoute_(e) {
     if (!key || q.key !== key) return json({ok: false, error: 'not allowed'});
     return json({ok: true, logs: strikeLogRows_(props)});
   }
-  if (q.op === 'create') return json(strikeLogCreateBoat_(props, q.name));   // a captain creates their boat's code
+  if (q.op === 'create') return json(strikeLogCreateBoat_(props, q.name, q.by));   // a captain creates their boat's code
   // action=strikelog: add one log (or op=share / del=1), always with a boat code
   const boat = strikeLogBoat_(props, String(q.code || ''));
   if (!boat) return json({ok: false, error: 'wrong boat code'});
@@ -87,18 +88,19 @@ function strikeLogBoatsSheet_(props) {
   let sh = ss.getSheetByName('Boats');
   if (!sh) {
     sh = ss.insertSheet('Boats');
-    sh.getRange(1, 1, 1, 4).setValues([STRIKELOG.BOATS_HEADER]).setFontWeight('bold'); sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, 5).setValues([STRIKELOG.BOATS_HEADER]).setFontWeight('bold'); sh.setFrozenRows(1);
     const old = props.getProperty('STRIKELOG_CODE');
     if (old) sh.appendRow(['My boat', old, '', '']);
   }
+  if (!sh.getRange(1, 5).getValue()) sh.getRange(1, 5).setValue('Created by').setFontWeight('bold');   // older tabs
   return sh;
 }
 
 function strikeLogBoats_(props) {
   const sh = strikeLogBoatsSheet_(props), n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, 4).getValues().map((r, k) => ({row: k + 2, name: String(r[0]).trim(), code: String(r[1]).trim(),
-    share: STRIKELOG.SHARES.indexOf(String(r[2]).trim()) >= 0 ? String(r[2]).trim() : ''})).filter(b => b.name && b.code);
+  return sh.getRange(2, 1, n, 5).getValues().map((r, k) => ({row: k + 2, name: String(r[0]).trim(), code: String(r[1]).trim(),
+    share: STRIKELOG.SHARES.indexOf(String(r[2]).trim()) >= 0 ? String(r[2]).trim() : '', by: String(r[4] || '').trim()})).filter(b => b.name && b.code);
 }
 
 function strikeLogBoat_(props, code) {
@@ -107,24 +109,29 @@ function strikeLogBoat_(props, code) {
   return strikeLogBoats_(props).find(b => b.code.toUpperCase() === code.toUpperCase()) || null;
 }
 
-/** A captain creates a code for their boat (name made unique). Returns the code to share with the crew. */
-function strikeLogCreateBoat_(props, name) {
-  name = String(name || '').replace(/[\u0000-\u001f<>"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+/** A captain creates a code for their boat. Names are unique: a duplicate is told who to ask for the code. */
+function strikeLogCreateBoat_(props, name, by) {
+  const clean = v => String(v || '').replace(/[\u0000-\u001f<>"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  name = clean(name); by = clean(by);
   if (name.length < 2) return {ok: false, error: 'enter the boat name'};
+  if (by.length < 2) return {ok: false, error: 'enter your name'};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return {ok: false, error: 'busy, try again'};
   try {
     const today = Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
     const n = Number(props.getProperty('STRIKELOG_NEWBOATS_' + today) || 0);
     if (n >= STRIKELOG.MAX_NEW_BOATS_PER_DAY) return {ok: false, error: 'too many new boats today, try tomorrow'};
-    const boats = strikeLogBoats_(props), names = boats.map(b => b.name.toLowerCase()), codes = boats.map(b => b.code);
-    let unique = name, k = 2;
-    while (names.indexOf(unique.toLowerCase()) >= 0) unique = name + ' ' + k++;
+    const boats = strikeLogBoats_(props), codes = boats.map(b => b.code);
+    const key = v => v.toLowerCase().replace(/[^a-z0-9]/g, '');               // 'Reel Deal' = 'reel-deal' = 'REELDEAL'
+    const dup = boats.find(b => key(b.name) === key(name));
+    if (dup) return {ok: false, duplicate: true, boat: dup.name, by: dup.by,
+                     error: dup.by ? `${dup.name} already has a code – check with ${dup.by} for it` : `${dup.name} already has a code – check with the boat's captain for it`};
+    const unique = name;
     const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';                      // no 0/O or 1/I to mix up
     let code = '';
     do { code = ''; for (let i = 0; i < 8; i++) code += ABC[Math.floor(Math.random() * ABC.length)]; code = code.slice(0, 4) + '-' + code.slice(4); }
     while (codes.indexOf(code) >= 0);
-    strikeLogBoatsSheet_(props).appendRow([unique, code, '', new Date().toISOString()]);
+    strikeLogBoatsSheet_(props).appendRow([unique, code, '', new Date().toISOString(), by]);
     props.setProperty('STRIKELOG_NEWBOATS_' + today, String(n + 1));
     return {ok: true, boat: unique, code: code, share: ''};
   } finally {

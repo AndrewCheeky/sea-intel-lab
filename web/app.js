@@ -160,7 +160,7 @@
     logs.forEach(l => {
       if (SIGHT.includes(l.species)) return;                         // sightings have their own symbol
       mineKeys.add(logKey(l.time, l.lat));
-      const pop = `<b>${esc(l.species)}${l.count > 1 ? ' × ' + l.count : ''}</b>${outcomeOf(l.note) ? ' · ' + esc(outcomeOf(l.note)) : ''}<br>${new Date(l.time).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(l.lat, l.lon)}` +
+      const pop = `<b>${esc(l.species)}${l.count > 1 ? ' × ' + l.count : ''}</b>${outcomeOf(l.note) ? ' · ' + esc(outcomeOf(l.note)) : ''}${store.get('sil.boat', '') ? `<br>${esc(store.get('sil.boat', ''))}` : ''}<br>${new Date(l.time).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(l.lat, l.lon)}` +
         `${noteText(l.note) ? '<br>' + esc(noteText(l.note)) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>${delBtn(l)}`;
       (l.count === 0 || l.species === 'No strikes here'
         ? L.circleMarker([l.lat, l.lon], {pane: 'pins', renderer: pinRenderer, radius: 6, color: '#061b33', weight: 2, fillColor: '#9aa5b1', fillOpacity: 1})
@@ -169,7 +169,7 @@
     for (const r of pubStrikes) {
       const k = logKey(r.date, r.lat); if (mineKeys.has(k) || hidden.has(k) || (r.id && (mineIds.has(r.id) || hidden.has('id:' + r.id)))) continue;
       L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 650, title: 'Strike ' + r.date.slice(0, 10)})
-        .bindPopup(`<b>${esc(r.note || 'Strike')}</b><br>${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${r.bank ? `Near ${esc(r.bank)} <small>(general area only)</small>` : pos2txt(r.lat, r.lon)}`).addTo(myLayer);
+        .bindPopup(`<b>${esc(r.note || 'Strike')}</b>${r.boat ? `<br>${esc(r.boat)}` : ''}<br>${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${r.bank ? `Near ${esc(r.bank)} <small>(general area only)</small>` : pos2txt(r.lat, r.lon)}`).addTo(myLayer);
     }
     const waiting = logs.filter(l => !l.synced).length;   // logs = this boat's only
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
@@ -231,7 +231,7 @@
   window.addEventListener('online', sendPending);
   setInterval(sendPending, 120000);
   // ---------- boat code and sharing (per boat: research only / general area / everything)
-  const SHARE_TXT = {research: 'Research only', bank: 'General area (bank)', all: 'Everything'};
+  const SHARE_TXT = {research: 'Research only', bank: 'Tournament Mode', all: 'Everything'};
   async function shareCall(level) {
     const code = store.get(CODE, ''); if (!code) return null;
     const q = new URLSearchParams({action: 'strikelog', op: 'share', code}); if (level) q.set('level', level);
@@ -254,7 +254,7 @@
   });
   $('shareBtn').addEventListener('click', () => askSharing());
   function openCode() {
-    $('codeIn').value = store.get(CODE, ''); $('boatIn').value = ''; $('newCode').hidden = true;
+    $('codeIn').value = store.get(CODE, ''); $('boatIn').value = ''; $('byIn').value = ''; $('newCode').hidden = true; $('dupMsg').hidden = true;
     $('codeNow').textContent = store.get(CODE, '') ? `This phone uses ${store.get('sil.boat', '') || 'a boat code'} (${store.get(CODE, '')}).` : 'No boat code on this phone yet.';
     $('codeDlg').showModal();
   }
@@ -272,10 +272,13 @@
     $('codeDlg').close(); toast(`Joined ${j.boat}`); useCode(code, j.boat, j.share);
   });
   $('createBtn').addEventListener('click', async () => {
-    const name = $('boatIn').value.trim(); if (name.length < 2) return toast('Type your boat name');
-    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'create', name})}`, {cache: 'no-store'})).json(); } catch {}
+    const name = $('boatIn').value.trim(), by = $('byIn').value.trim();
+    if (name.length < 2) return toast('Type your boat name'); if (by.length < 2) return toast('Type your name');
+    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'create', name, by})}`, {cache: 'no-store'})).json(); } catch {}
     if (!j) return toast('No signal – try again when connected');
+    if (j.duplicate) { $('dupMsg').textContent = j.error; $('dupMsg').hidden = false; return; }
     if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Creating codes needs the updated logging script (StrikeLog.gs)' : 'Not created: ' + (j.error || 'unknown'));
+    $('dupMsg').hidden = true;
     $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCode').hidden = false;
     store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', ''); drawMyLogs(); drawSightings();
   });
@@ -332,7 +335,7 @@
       if (age > 24 || age < -1 || seen.has(k)) continue; seen.add(k);
       L.marker([s.lat, s.lon], {zIndexOffset: 600, icon: L.divIcon({className: 'seen', iconSize: [24, 24], iconAnchor: [12, 12],
         html: `<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="opacity:${Math.max(.35, 1 - age / 24)}"><circle cx="12" cy="12" r="10" fill="#7CFC9A" stroke="#061b33" stroke-width="2"/><path d="M6 13c2-2 4-2 6 0 2-2 4-2 6 0" fill="none" stroke="#061b33" stroke-width="2" stroke-linecap="round"/></svg>`})})
-        .bindPopup(`<b>${esc(s.what)}</b><br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${s.bank ? `Near ${esc(s.bank)} <small>(general area only)</small>` : pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : ''}`).addTo(sightLayer);
+        .bindPopup(`<b>${esc(s.what)}</b>${s.boat ? `<br>${esc(s.boat)}` : s.own && store.get('sil.boat', '') ? `<br>${esc(store.get('sil.boat', ''))}` : ''}<br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${s.bank ? `Near ${esc(s.bank)} <small>(general area only)</small>` : pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : ''}`).addTo(sightLayer);
     }
   }
   const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];

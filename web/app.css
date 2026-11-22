@@ -94,3 +94,4 @@ dialog input,dialog select{display:block;width:100%;margin-top:4px;min-height:44
 .codeRow button{min-height:40px;padding:0 14px;border-radius:9px;border:1px solid var(--line);background:#12345a;color:var(--ink);font:600 14px inherit}
 .newCode{margin-top:12px;padding:10px;border:1px dashed var(--accent);border-radius:10px}
 .bigCode{font:800 26px/1.2 ui-monospace,monospace;letter-spacing:.08em;margin:4px 0}
+.dupMsg{margin:8px 0 0;padding:8px 10px;border-radius:9px;background:#5a3a00;color:#ffe2a8;font-size:13px}

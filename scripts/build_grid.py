@@ -509,6 +509,7 @@ def main():
         e = {'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': la, 'lon': lo,
              'note': f"{r['species']}{' × ' + str(r['count']) if r['count'] > 1 else ''}" + (f" · {outcome_of(r)}" if outcome_of(r) else '')}
         if bank: e['bank'] = bank
+        if r.get('boat'): e['boat'] = r['boat']
         if r.get('id'): e['id'] = r['id']
         pub_rel.append(e)
     (OUT / 'releases.json').write_text(json.dumps(pub_rel, indent=1))
@@ -527,6 +528,7 @@ def main():
         if la is None: continue
         e = {'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': la, 'lon': lo, 'what': r['species']}
         if bank: e['bank'] = bank
+        if r.get('boat'): e['boat'] = r['boat']
         if r.get('id'): e['id'] = r['id']
         pub_seen.append(e)
     (OUT / 'sightings.json').write_text(json.dumps(pub_seen, indent=1))
