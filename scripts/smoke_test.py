@@ -51,7 +51,7 @@ async def main():
                 print('strike popup:', (await pg.inner_text('.leaflet-popup-content'))[:80].replace(chr(10), ' / '))
                 btn = await pg.query_selector('.leaflet-popup .delLog')
                 if btn: await btn.click(); await pg.wait_for_timeout(600)
-            deleted = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 0 && !document.querySelector('path[fill=\\"#2ee66b\\"]')")
+            deleted = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 0 && !document.querySelector('path[fill=\"#2ee66b\"]')")
         print('delete a log:', deleted)
         await pg.click('#moreBtn')
         await pg.click('#boatBtn'); await pg.wait_for_timeout(1500)
