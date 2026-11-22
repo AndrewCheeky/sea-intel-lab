@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=18">
+<link rel="stylesheet" href="app.css?v=19">
 </head>
 <body>
 <header class="top">
@@ -107,6 +107,24 @@
   </form>
 </dialog>
 
+<dialog id="codeDlg">
+  <div class="codeBox">
+    <h2>Boat code</h2>
+    <p id="codeNow" class="small"></p>
+    <h3>Join your boat</h3>
+    <div class="codeRow"><input id="codeIn" type="text" maxlength="12" placeholder="Code from your captain" autocapitalize="characters" autocomplete="off"><button id="joinBtn" class="primary">Join</button></div>
+    <h3>Captain: create a code for your boat</h3>
+    <div class="codeRow"><input id="boatIn" type="text" maxlength="40" placeholder="Boat name"><button id="createBtn">Create</button></div>
+    <div id="newCode" class="newCode" hidden>
+      <p>Code for <b id="newBoatTxt"></b>:</p>
+      <p class="bigCode" id="newCodeTxt"></p>
+      <p class="small">Share it only with your crew and people you trust. Anyone with it logs as your boat.</p>
+      <button id="shareCodeBtn">Share with crew</button>
+    </div>
+    <div class="dlgBtns"><button id="leaveBtn">Remove from this phone</button><button id="codeDoneBtn" class="primary">Done</button></div>
+  </div>
+</dialog>
+
 <dialog id="shareDlg">
   <form method="dialog">
     <h2>Share your catches? <small id="shareBoat"></small></h2>
@@ -140,6 +158,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 </body>
 </html>

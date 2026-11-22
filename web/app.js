@@ -168,7 +168,12 @@
     $('shareState').textContent = SHARE_TXT[store.get('sil.share', '')] || 'not chosen';
   }
   let pendingPos = null;
+  function needCode() {
+    if (store.get(CODE, '')) return false;
+    toast('No boat code is entered on the phone'); setTimeout(openCode, 900); return true;
+  }
   $('logBtn').addEventListener('click', () => {
+    if (needCode()) return;
     pendingPos = last;
     $('species').value = 'Blue marlin'; $('count').value = 1;
     for (const id of ['oStrike', 'oLanded', 'oReleased']) $(id).checked = id === 'oStrike';
@@ -186,7 +191,7 @@
     logs.push({id: newId(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
                count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: !!last, synced: false});
     store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
-    toast(store.get(CODE, '') ? 'Saved – sending when there is signal' : 'Saved on this phone (enter your boat code under More to send it)');
+    toast('Saved – sending when there is signal');
     sendPending();
   });
   // Send logs to the Google Sheet; anything that fails stays queued and is retried later.
@@ -239,16 +244,38 @@
       : j ? 'Not saved: ' + (j.error || 'unknown') : 'Not saved – no signal, try again when connected');
   });
   $('shareBtn').addEventListener('click', () => askSharing());
-  $('codeBtn').addEventListener('click', async () => {
-    const v = prompt('Boat code (each boat has its own). Leave empty to stop sending.', store.get(CODE, ''));
-    if (v === null) return; store.set(CODE, v.trim()); store.set('sil.share', ''); store.set('sil.boat', ''); drawMyLogs();
-    if (!v.trim()) return;
-    const j = await shareCall();
-    if (!j) { toast('Code saved – it will be checked when there is signal'); return; }
-    if (!j.ok) { toast('Boat code not accepted'); return; }
-    toast(`Welcome ${j.boat}`); sendPending();
-    if (!j.share) askSharing();                                     // first use on this boat: ask for consent
-  });;
+  function openCode() {
+    $('codeIn').value = store.get(CODE, ''); $('boatIn').value = ''; $('newCode').hidden = true;
+    $('codeNow').textContent = store.get(CODE, '') ? `This phone uses ${store.get('sil.boat', '') || 'a boat code'} (${store.get(CODE, '')}).` : 'No boat code on this phone yet.';
+    $('codeDlg').showModal();
+  }
+  $('codeBtn').addEventListener('click', openCode);
+  async function useCode(code, boat, share) {
+    store.set(CODE, code); store.set('sil.boat', boat || ''); store.set('sil.share', share || ''); drawMyLogs(); sendPending();
+    if (!share) askSharing();                                        // first use on this boat: ask for consent
+  }
+  $('joinBtn').addEventListener('click', async () => {
+    const code = $('codeIn').value.trim().toUpperCase(); if (!code) return toast('Type the code your captain gave you');
+    const q = new URLSearchParams({action: 'strikelog', op: 'share', code});
+    let j = null; try { j = await (await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'})).json(); } catch {}
+    if (!j) return toast('No signal – try again when connected');
+    if (!j.ok) return toast(/code/.test(j.error || '') ? 'That boat code was not found' : 'Not saved: ' + (j.error || 'unknown'));
+    $('codeDlg').close(); toast(`Joined ${j.boat}`); useCode(code, j.boat, j.share);
+  });
+  $('createBtn').addEventListener('click', async () => {
+    const name = $('boatIn').value.trim(); if (name.length < 2) return toast('Type your boat name');
+    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'create', name})}`, {cache: 'no-store'})).json(); } catch {}
+    if (!j) return toast('No signal – try again when connected');
+    if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Creating codes needs the updated logging script (StrikeLog.gs)' : 'Not created: ' + (j.error || 'unknown'));
+    $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCode').hidden = false;
+    store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', ''); drawMyLogs();
+  });
+  $('shareCodeBtn').addEventListener('click', async () => {
+    const text = `Boat code for ${$('newBoatTxt').textContent} on the Marlin strike grid: ${$('newCodeTxt').textContent}\n${location.origin + location.pathname}\n(Open it, More → Boat code → Join)`;
+    try { if (navigator.share) await navigator.share({text}); else { await navigator.clipboard.writeText(text); toast('Copied – paste it to your crew'); } } catch {}
+  });
+  $('codeDoneBtn').addEventListener('click', () => { $('codeDlg').close(); if (!store.get('sil.share', '')) askSharing(); });
+  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); $('codeDlg').close(); });;
 
   // ---------- track record
   async function loadTrack() {
@@ -302,6 +329,7 @@
   const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];
   let seenPos = null;
   $('seenBtn').addEventListener('click', () => {
+    if (needCode()) return;
     seenPos = last; if (!last) { const c = map.getCenter(); seenPos = [c.lat, c.lng]; }
     $('seenWhere').textContent = last ? `At ${pos2txt(last[0], last[1])} (your boat).` : 'No boat position yet – it will use the centre of the map.';
     $('seenDlg').showModal();
