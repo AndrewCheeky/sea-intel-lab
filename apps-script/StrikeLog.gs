@@ -9,10 +9,10 @@
  *   STRIKELOG_CODE      – the logging code you type once into the live map (share it with your crew only)
  *   STRIKELOG_READ_KEY  – a long random key used only by the GitHub build to read the logs
  *
- * Setup (once), in the Wx-Exercise5day project:
+ * Setup (once), in the MARINE Apps Script project (the one behind marine.islandsoutside.com):
  *  1. Add this file (StrikeLog.gs).
- *  2. In Code.gs doGet, next to the tally line (before setupExwxOps()), add:
- *        if (action === 'strikelog' || action === 'strikelogs') return strikeLogRoute_(e);
+ *  2. In Code.gs doGet, right after the 'marinealert' line, add:
+ *        if (mw8Action === 'strikelog' || mw8Action === 'strikelogs') return strikeLogRoute_(e);
  *  3. Project Settings → Script Properties: add STRIKELOG_CODE (e.g. a 6+ character word) and
  *     STRIKELOG_READ_KEY (run makeStrikeLogReadKey() to print a random one).
  *  4. Run testStrikeLog() and allow the Google Sheets permission. The log shows the sheet's link.
