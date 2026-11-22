@@ -1,4 +1,1 @@
-[
-  {"date": "2026-11-20T15:00:00Z", "lat": 17.688, "lon": -76.917, "species": "marlin", "count": 5, "note": "Approx. from Navionics track (camera icon)"},
-  {"date": "2026-11-21T12:24:00Z", "lat": 17.712136, "lon": -76.880482, "species": "marlin", "count": 1, "note": "Phone GPS at release"}
-]
+[{"date": "2026-11-20T15:00:00Z", "lat": 17.688, "lon": -76.917, "species": "marlin", "count": 5, "note": "Approx. from Navionics track (camera icon)"}, {"date": "2026-11-21T12:24:00Z", "lat": 17.712136, "lon": -76.880482, "species": "marlin", "count": 1, "note": "Phone GPS at release"}]

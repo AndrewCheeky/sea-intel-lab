@@ -99,13 +99,17 @@
   map.on('dragstart', () => { if (follow) { follow = false; $('followBtn').setAttribute('aria-pressed', false); } });
 
   // ---------- releases logged on this phone
-  const LOGS = 'sil.logs';
+  const LOGS = 'sil.logs', CODE = 'sil.code';
+  const LOG_URL = 'https://script.google.com/macros/s/AKfycbyFY483SYd2P772OZbtMiMTD6CUUuTwLFsJBm2GLxmxmZk2uBm9oUr2N2emOf41L1_CTw/exec';
+  const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9-]/g, '');
   const myLayer = L.layerGroup().addTo(map);
   function drawMyLogs() {
     myLayer.clearLayers(); const logs = store.get(LOGS, []);
     logs.forEach(l => L.circleMarker([l.lat, l.lon], {radius: 6, color: '#061b33', weight: 2, fillColor: l.count === 0 ? '#9aa5b1' : '#00e5ff', fillOpacity: 1})
-      .bindPopup(`${esc(l.species)} × ${l.count}<br>${new Date(l.time).toLocaleString()}<br>${pos2txt(l.lat, l.lon)}${l.note ? '<br>' + esc(l.note) : ''}`).addTo(myLayer));
-    $('logCount').textContent = logs.length ? `${logs.length} on this phone` : 'none yet';
+      .bindPopup(`${esc(l.species)} × ${l.count}<br>${new Date(l.time).toLocaleString()}<br>${pos2txt(l.lat, l.lon)}${l.note ? '<br>' + esc(l.note) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>`).addTo(myLayer));
+    const waiting = logs.filter(l => !l.synced).length;
+    $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
+    $('codeState').textContent = store.get(CODE, '') ? 'set' : 'not set';
   }
   let pendingPos = null;
   $('logBtn').addEventListener('click', () => {
@@ -118,10 +122,54 @@
   $('logDlg').addEventListener('close', () => {
     if ($('logDlg').returnValue !== 'save' || !pendingPos) return;
     const logs = store.get(LOGS, []);
-    logs.push({time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
-               count: Math.max(0, parseInt($('count').value, 10) || 0), note: $('note').value.trim().slice(0, 120), exact: !!last});
-    store.set(LOGS, logs); $('note').value = ''; drawMyLogs(); toast('Saved on this phone');
+    logs.push({id: newId(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
+               count: Math.max(0, parseInt($('count').value, 10) || 0), note: $('note').value.trim().slice(0, 120), exact: !!last, synced: false});
+    store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
+    toast(store.get(CODE, '') ? 'Saved – sending when there is signal' : 'Saved on this phone (set a logging code to send it)');
+    sendPending();
   });
+  // Send logs to the Google Sheet; anything that fails stays queued and is retried later.
+  let sending = false;
+  async function sendPending() {
+    const code = store.get(CODE, ''); if (!code || sending || !navigator.onLine) return;
+    sending = true;
+    try {
+      for (const l of store.get(LOGS, []).filter(x => !x.synced)) {
+        if (!l.id) l.id = newId();
+        const q = new URLSearchParams({action: 'strikelog', code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0'});
+        let j = null;
+        try { const r = await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }       // no signal: try later
+        if (j && j.ok) { const all = store.get(LOGS, []); const m = all.find(x => x.id === l.id || x.time === l.time); if (m) { m.synced = true; m.id = l.id; } store.set(LOGS, all); }
+        else if (j && /code/.test(j.error || '')) { toast('Logging code not accepted – check it under More'); break; }
+        else if (j) { toast('Not sent: ' + (j.error || 'unknown')); break; }
+      }
+    } finally { sending = false; drawMyLogs(); }
+  }
+  window.addEventListener('online', sendPending);
+  setInterval(sendPending, 120000);
+  $('codeBtn').addEventListener('click', () => {
+    const v = prompt('Logging code (from Andrew). Leave empty to stop sending.', store.get(CODE, ''));
+    if (v === null) return; store.set(CODE, v.trim()); drawMyLogs(); if (v.trim()) { toast('Code saved'); sendPending(); }
+  });
+
+  // ---------- track record
+  async function loadTrack() {
+    let t; try { t = await getJSON('track-record.json'); } catch { $('trackSummary').textContent = 'No track record yet.'; return; }
+    const s = t.strikes, sh = t.area_share || {}, pct = v => v == null ? '–' : (v * 100 < 1 ? (v * 100).toFixed(1) : Math.round(v * 100)) + '%';
+    $('trackShort').textContent = s.scored ? `${s.high_plus} of ${s.scored} strikes in High+` : 'collecting';
+    $('trackSummary').innerHTML = s.scored
+      ? `<b>${s.high_plus} of ${s.scored}</b> scored strikes were in <b>High or Highest</b> squares, which cover about <b>${pct(sh.high_plus)}</b> of the grid area. ` +
+        `<b>${s.good_plus} of ${s.scored}</b> were Good or better (${pct(sh.good_plus)} of the area).` +
+        (t.quiet.scored ? ` Quiet logs: ${t.quiet.below_good} of ${t.quiet.scored} were in squares below Good.` : '') +
+        (t.not_scored ? ` <span class="small">(${t.not_scored} log${t.not_scored > 1 ? 's' : ''} not counted)</span>` : '')
+      : `Collecting. ${t.snapshots} grid${t.snapshots === 1 ? '' : 's'} saved so far; logs made from now on will be scored against them.` +
+        (t.not_scored ? ` ${t.not_scored} earlier log${t.not_scored > 1 ? 's' : ''} not counted.` : '');
+    $('trackList').innerHTML = t.entries.slice(-12).reverse().map(e =>
+      `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count} · ` +
+      (e.scored ? `<b>${esc(e.cls)}</b> (${e.score.toFixed(2)})` : 'not counted') + '</li>').join('');
+  }
+  $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
+
   $('sendLogs').addEventListener('click', async () => {
     const logs = store.get(LOGS, []); if (!logs.length) return toast('No releases logged yet');
     const text = 'Strike grid logs\n' + logs.map(l => `${l.time} | ${l.species} x${l.count} | ${l.lat}, ${l.lon}${l.exact ? '' : ' (map centre)'}${l.note ? ' | ' + l.note : ''}`).join('\n');
@@ -143,6 +191,7 @@
   });
   if (store.get('sil.tiles', false)) { $('tiles').checked = true; $('tiles').dispatchEvent(new Event('change')); }
 
+  loadTrack(); setTimeout(sendPending, 1500);
   load().catch(e => { $('built').textContent = 'Could not load the grid. ' + (navigator.onLine ? 'Try again shortly.' : 'Open it once with signal.'); console.error(e); });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

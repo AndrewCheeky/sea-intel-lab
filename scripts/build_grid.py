@@ -150,16 +150,45 @@ def read_depth():
     return depth[ii, jj], slope[ii, jj]
 
 
-def read_releases():
+def parse_time(v):
+    t = datetime.fromisoformat(str(v).replace('Z', '+00:00'))
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def read_logs():
+    """All logs: data/releases.json plus the live map's logs from the Apps Script sheet (if configured)."""
     f = DATA / 'releases.json'
-    items = json.loads(f.read_text()) if f.exists() else []
+    logs = [dict(r, source='file') for r in (json.loads(f.read_text()) if f.exists() else [])]
+    url, key = os.getenv('STRIKELOG_URL', '').strip(), os.getenv('STRIKELOG_KEY', '').strip()
+    if url and key:
+        try:
+            j = json.loads(fetch(url + ('&' if '?' in url else '?') + urllib.parse.urlencode({'action': 'strikelogs', 'key': key})))
+            if j.get('ok'): logs += [dict(r, source='app') for r in j.get('logs', [])]
+            else: log('strike logs refused:', j.get('error'))
+        except Exception as e:
+            log('strike logs unavailable:', e)
+    out, seen = [], set()
+    for r in logs:
+        try:
+            r['when'] = parse_time(r['date']); r['lat'] = float(r['lat']); r['lon'] = float(r['lon'])
+            r['count'] = int(r.get('count', 1)); r['species'] = r.get('species', 'Other')
+        except Exception as e:
+            log('skipping log', r, e); continue
+        k = (r['when'].strftime('%Y%m%d%H%M'), round(r['lat'], 3), round(r['lon'], 3))
+        if k in seen: continue
+        seen.add(k); out.append(r)
+    return out
+
+
+def is_strike(r): return r['count'] > 0 and r['species'] != 'No strikes here'
+
+
+def read_releases(logs):
     now = datetime.now(timezone.utc)
     out = []
-    for r in items:
+    for r in [x for x in logs if is_strike(x)]:
         try:
-            when = datetime.fromisoformat(r['date'].replace('Z', '+00:00'))
-            if when.tzinfo is None: when = when.replace(tzinfo=timezone.utc)
-            age = (now - when).days
+            age = (now - r['when']).days
             if age > 60: continue
             out.append(dict(r, weight=0.5 ** (age / 14)))          # half the weight every 14 days
         except Exception as e:
@@ -197,7 +226,8 @@ def main():
         log('depth unavailable, using approximate drop-off line:', e)
         s_drop = gauss(dist_to_lines([DROP_FALLBACK]), SIGMA_NM['drop']); sources['depth'] = 'approximate drop-off line (Navionics chart)'
     # releases
-    rel = read_releases()
+    logs = read_logs()
+    rel = read_releases(logs)
     s_rel = np.zeros(GLAT.shape)
     d_rel = np.full(GLAT.shape, 999.0)
     for r in rel:
@@ -269,7 +299,52 @@ def main():
     try: (OUT / 'banks.json').write_bytes(fetch(BASE + 'banks.json'))
     except Exception: pass
     write_kml(feats, top, rel, meta); write_gpx(top, rel)
+    # this build's grid, kept for the track record (scores ×1000 for every shaded square)
+    ocean = int(np.count_nonzero(~binary_dilation(land, iterations=1)))
+    shaded = [[int(i), int(j), int(round(float(score[i, j]) * 1000))] for i, j in zip(*np.nonzero(score >= .32))]
+    (OUT / 'snapshot.json').write_text(json.dumps(dict(built_utc=built, area=AREA, cell=CELL, ocean_cells=ocean, cells=shaded), separators=(',', ':')))
+    track_record(logs)
     log(f'{len(feats)} squares, top spots {[(t["lat"], t["lon"]) for t in top]}, sources {sources}')
+
+
+# ---------------- track record
+def track_record(logs):
+    """Scores every log against the latest grid published BEFORE it (within 36 h), never a later one."""
+    hist = Path(os.getenv('HISTORY_DIR', ROOT / 'history')) / 'grids'
+    snaps = []
+    for f in sorted(hist.glob('*.json')) if hist.exists() else []:
+        try:
+            d = json.loads(f.read_text()); d['t'] = parse_time(d['built_utc'])
+            d['lookup'] = {(c[0], c[1]): c[2] / 1000 for c in d['cells']}; snaps.append(d)
+        except Exception as e:
+            log('bad snapshot', f.name, e)
+    cls_of = lambda v: next((c for t, c in [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')] if v >= t), 'Not shaded')
+    entries, cover_hi, cover_good = [], [], []
+    for r in sorted(logs, key=lambda x: x['when']):
+        before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
+        e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r))
+        if not before:
+            e['scored'] = False; entries.append(e); continue
+        s = before[-1]; A = s['area']
+        i = math.floor((r['lat'] - A['south']) / s['cell']); j = math.floor((r['lon'] - A['west']) / s['cell'])
+        if not (A['south'] <= r['lat'] < A['north'] and A['west'] <= r['lon'] < A['east']):
+            e['scored'] = False; e['why'] = 'outside the grid area'; entries.append(e); continue
+        v = s['lookup'].get((i, j), 0.0)
+        e.update(scored=True, score=round(v, 2), cls=cls_of(v), grid_built=s['built_utc'])
+        n = max(s['ocean_cells'], 1)
+        cover_hi.append(sum(1 for x in s['lookup'].values() if x >= .77) / n)
+        cover_good.append(sum(1 for x in s['lookup'].values() if x >= .62) / n)
+        entries.append(e)
+    sc = [e for e in entries if e.get('scored')]
+    st = [e for e in sc if e['strike']]; qu = [e for e in sc if not e['strike']]
+    out = dict(updated_utc=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), snapshots=len(snaps),
+               strikes=dict(scored=len(st), high_plus=sum(e['score'] >= .77 for e in st), good_plus=sum(e['score'] >= .62 for e in st)),
+               quiet=dict(scored=len(qu), below_good=sum(e['score'] < .62 for e in qu)),
+               area_share=dict(high_plus=round(sum(cover_hi) / len(cover_hi), 3) if cover_hi else None,
+                               good_plus=round(sum(cover_good) / len(cover_good), 3) if cover_good else None),
+               not_scored=len(entries) - len(sc), entries=entries[-50:])
+    (OUT / 'track-record.json').write_text(json.dumps(out, indent=1))
+    log('track record:', {k: out[k] for k in ('snapshots', 'strikes', 'quiet', 'area_share', 'not_scored')})
 
 
 # ---------------- coast
