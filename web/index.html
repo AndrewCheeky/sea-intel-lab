@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=2">
+<link rel="stylesheet" href="app.css?v=3">
 </head>
 <body>
 <header class="top">
@@ -37,7 +37,17 @@
   <a class="row" href="strike-grid.kml" download>Download KML <small>Google Earth / My Maps</small></a>
   <a class="row" href="top-spots.gpx" download>Download GPX <small>Top spots for Navionics</small></a>
   <label class="row"><input type="checkbox" id="tiles"> Detailed background map <small>needs signal</small></label>
-  <button class="row" id="sendLogs">Send my logged releases <small id="logCount">none yet</small></button>
+  <button class="row" id="trackBtn">Track record <small id="trackShort">–</small></button>
+  <button class="row" id="codeBtn">Logging code <small id="codeState">not set</small></button>
+  <button class="row" id="sendLogs">Share my logs as text <small id="logCount">none yet</small></button>
+</div>
+
+<div id="track" class="sheet info" hidden>
+  <h2>Track record</h2>
+  <p id="trackSummary">Loading…</p>
+  <ol id="trackList" class="small"></ol>
+  <p class="small">Each log is checked against the grid published <b>before</b> it (within 36 hours), never a later one.
+  Logs from before tracking started are listed but not counted.</p>
 </div>
 
 <div id="info" class="sheet info" hidden>
@@ -52,7 +62,7 @@
   <p>Numbered circles are the best squares (at least 2 NM apart). Stars are past releases. Tap a square to see why it scored.</p>
   <p id="sources" class="small"></p>
   <p class="small">Experimental. Positions are approximate. Not for navigation – use your chart and chartplotter.
-  Your position stays on your phone; it is only sent if you choose “Send my logged releases”.</p>
+  Your boat position stays on your phone. Only releases you log are sent (to your own Google Sheet), and only once a logging code is set.</p>
 </div>
 
 <dialog id="logDlg">
@@ -69,6 +79,6 @@
 </dialog>
 
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

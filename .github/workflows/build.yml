@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 concurrency:
@@ -29,8 +29,15 @@ jobs:
           path: cache
           key: etopo-${{ hashFiles('scripts/build_grid.py') }}
           restore-keys: etopo-
+      - name: Get the track-record history
+        run: |
+          if git ls-remote --exit-code --heads origin history >/dev/null 2>&1; then
+            git fetch --depth 1 origin history && git worktree add history FETCH_HEAD
+          fi
       - name: Build grid
         env:
+          STRIKELOG_URL: ${{ secrets.STRIKELOG_URL }}
+          STRIKELOG_KEY: ${{ secrets.STRIKELOG_KEY }}
           SOURCE_SITE: ${{ vars.SOURCE_SITE || 'https://andrewcheeky.github.io/jamaica-marine-currents/' }}
         run: python scripts/build_grid.py
       - name: Add the live map
@@ -43,6 +50,15 @@ jobs:
         run: |
           pip install playwright >/dev/null && python -m playwright install --with-deps chromium >/dev/null
           python scripts/smoke_test.py site
+      - name: Save this build's grid to the track record
+        run: |
+          ts=$(date -u +%Y%m%dT%H%MZ)
+          if [ ! -e history/.git ]; then git worktree add --orphan -b history history; fi
+          mkdir -p history/grids && cp site/snapshot.json history/grids/$ts.json
+          cd history
+          git add grids
+          git -c user.name="sea-intel-lab bot" -c user.email="noreply@github.com" commit -qm "Grid $ts" || exit 0
+          git push -q origin HEAD:history
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
