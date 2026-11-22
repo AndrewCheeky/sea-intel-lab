@@ -53,7 +53,8 @@
       L.rectangle([[la - cellDeg / 2, lo - cellDeg / 2], [la + cellDeg / 2, lo + cellDeg / 2]],
         {renderer: canvas, stroke: false, fillColor: COLORS[p.cls], fillOpacity: OPAC[p.cls]}).on('click', ev => L.popup().setLatLng(ev.latlng).setContent(explain(p)).openOn(map)).addTo(sea);
     }
-    banks.forEach(b => L.circleMarker([b.lat, b.lon], {radius: 3.5, color: '#fff', weight: 1, fillColor: '#e8475f', fillOpacity: 1, interactive: false}).addTo(sea));
+    banks.forEach(b => L.circleMarker([b.lat, b.lon], {radius: 5, color: '#fff', weight: 1.5, fillColor: '#e8475f', fillOpacity: 1})
+      .bindPopup(() => bankPopup(b), {maxWidth: 300}).addTo(sea));
     rel.forEach(r => L.marker([r.lat, r.lon], {icon: L.divIcon({className: '', html: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="#00e5ff" stroke="#061b33" stroke-width="1.5"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11]}),
       title: 'Release ' + r.date.slice(0, 10)}).bindPopup(`Release ${esc(r.date.slice(0, 10))}<br>${pos2txt(r.lat, r.lon)}${r.note ? '<br>' + esc(r.note) : ''}`).addTo(sea));
     top.forEach(t => L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: `${t.region || ''} top ${t.rank}`, zIndexOffset: 500})
@@ -96,6 +97,9 @@
     $('here').textContent = c ? `${c.cls} (${c.score.toFixed(2)})` : 'Not shaded';
     let best = null, bd = 1e9;
     for (const h of hot) { const d = nm(here, [h.lat, h.lon]); if (d < bd) { bd = d; best = h; } }
+    const cp = nearestCond(la, lo), ck = condIndex();
+    if (cp && ck >= 0) { $('seaRow').hidden = false; $('seaHere').textContent = condText(cp, ck); } else $('seaRow').hidden = true;
+    if (!onPos.confDone && confData) { onPos.confDone = true; renderConf(); }
     $('best').textContent = best ? (bd < .35 ? `You're on it (${best.cls})` : `${best.cls} ${bd.toFixed(1)} NM ${compass(bearing(here, [best.lat, best.lon]))}`) : '–';
   }
   function onErr(e) { toast(e.code === 1 ? 'Location permission is off for this site.' : 'No GPS fix yet – keep the page open.'); }
@@ -194,7 +198,7 @@
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
   });
 
-  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); renderTimes(); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
+  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); renderTimes(); renderConf(); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
 
   // ---------- birds / bait / weed sightings (logged like releases, short-lived on the map)
   const sightLayer = L.layerGroup().addTo(map);
@@ -312,6 +316,80 @@
   }
   $('contours').addEventListener('change', e => showContours(e.target.checked));
   if (store.get('sil.contours', false)) { $('contours').checked = true; showContours(true); }
+
+
+  // ---------- wind, sea and current (from the build) · weed seen by satellite · how much to trust the picture
+  let cond = null;
+  const VIEW_REGION = {south: 'South coast', east: 'East & north-east', north: 'North & west', all: 'South coast'};
+  function condIndex() {
+    if (!cond) return -1;
+    const k = Math.floor((Date.now() - Date.parse(cond.start_utc)) / 36e5);
+    return k >= 0 && k < 36 ? k : -1;
+  }
+  function condText(p, k) {
+    const part = [];
+    if (p.wind && p.wind[k] != null) part.push(`Wind ${p.wind[k]} kn from ${compass(p.wdir[k])}${p.gust[k] > p.wind[k] + 4 ? `, gusts ${p.gust[k]}` : ''}`);
+    if (p.wave && p.wave[k] != null) part.push(`Seas ${p.wave[k].toFixed(1)} m${p.period[k] ? ` every ${p.period[k]} s` : ''}`);
+    if (p.cur && p.cur[k] != null) part.push(`Current ${p.cur[k].toFixed(1)} kn running ${compass(p.cdir[k])}`);
+    return part.join(' · ');
+  }
+  function nearestCond(la, lo) {
+    if (!cond) return null; let best = null, bd = 1e9;
+    for (const p of cond.points) { const d = nm([la, lo], [p.lat, p.lon]); if (d < bd) { bd = d; best = p; } }
+    return bd < 25 ? best : null;
+  }
+  function bankPopup(b) {
+    const k = condIndex(), p = cond && cond.points.find(x => x.kind === 'bank' && x.name === b.name);
+    let html = `<div class="cond"><b>${esc(b.name)}</b>`;
+    if (!p || k < 0) return html + '<br><small>Wind and sea not available yet</small></div>';
+    html += `<br>${esc(condText(p, k))}<table><tr><th></th><th>Wind</th><th>Seas</th><th>Current</th></tr>`;
+    for (let h = k; h < Math.min(k + 25, 36); h += 3) {
+      const t = new Date(Date.parse(cond.start_utc) + h * 36e5);
+      html += `<tr><th>${t.toLocaleTimeString([], {weekday: h - k >= 12 ? 'short' : undefined, hour: 'numeric'})}</th><td>${p.wind[h] ?? '–'} ${p.wdir[h] != null ? compass(p.wdir[h]) : ''}</td>` +
+              `<td>${p.wave[h] != null ? p.wave[h].toFixed(1) + ' m' : '–'}</td><td>${p.cur[h] != null ? p.cur[h].toFixed(1) + ' → ' + compass(p.cdir[h]) : '–'}</td></tr>`;
+    }
+    return html + '</table><small>Wind from · current running towards · knots</small></div>';
+  }
+  const arrowLayer = L.layerGroup();
+  function drawArrows() {
+    arrowLayer.clearLayers(); const k = condIndex(); if (k < 0) return;
+    for (const p of cond.points) {
+      const v = p.cur && p.cur[k], d = p.cdir && p.cdir[k]; if (v == null || d == null) continue;
+      const len = 14 + Math.min(v, 2) * 10;
+      L.marker([p.lat, p.lon], {interactive: false, keyboard: false, icon: L.divIcon({className: 'curArrow', iconSize: [60, 60], iconAnchor: [30, 30],
+        html: `<svg width="60" height="60" viewBox="-30 -30 60 60" aria-hidden="true"><g transform="rotate(${d})"><line x1="0" y1="${len / 2}" x2="0" y2="${-len / 2}" stroke="#061b33" stroke-width="5" stroke-linecap="round"/><path d="M0 ${-len / 2 - 6}l5 8h-10z" fill="#061b33"/>` +
+              `<line x1="0" y1="${len / 2}" x2="0" y2="${-len / 2}" stroke="#7df9ff" stroke-width="2.5" stroke-linecap="round"/><path d="M0 ${-len / 2 - 5}l3.5 6.5h-7z" fill="#7df9ff"/></g>` +
+              `<text x="0" y="${len / 2 + 13}" text-anchor="middle" font-size="10" font-weight="700" fill="#fff" stroke="#061b33" stroke-width="3" paint-order="stroke">${v.toFixed(1)}</text></svg>`})}).addTo(arrowLayer);
+    }
+  }
+  $('curArrows').addEventListener('change', e => { store.set('sil.arrows', e.target.checked); if (e.target.checked) { drawArrows(); arrowLayer.addTo(map); if (!cond) toast('Current arrows load with signal'); } else map.removeLayer(arrowLayer); });
+  const weedLayer = L.layerGroup();
+  function drawWeed(w) {
+    weedLayer.clearLayers();
+    for (const p of w.patches) L.circleMarker([p.lat, p.lon], {radius: Math.min(3 + Math.sqrt(p.size), 9), color: '#2f5d12', weight: 1, fillColor: '#b6f23a', fillOpacity: .85})
+      .bindPopup(`<b>Weed seen by satellite</b><br>${pos2txt(p.lat, p.lon)}<br><small>${p.size > 6 ? 'Large patch' : 'Small patch'} · seen in the 3 days to ${esc(w.date)}. It drifts, so look along the current.</small>`).addTo(weedLayer);
+  }
+  let weedData = null;
+  $('weedLayer').addEventListener('change', e => { store.set('sil.weed', e.target.checked); if (e.target.checked) { if (!weedData) toast('Weed data loads with signal'); weedLayer.addTo(map); } else map.removeLayer(weedLayer); });
+  let confData = null;
+  function renderConf() {
+    if (!confData) return;
+    const ref = last ? null : VIEW_REGION[store.get('sil.view', 'south')];
+    let reg = ref;
+    if (last && cond) { const c = nearestCond(last[0], last[1]); reg = c ? (c.kind === 'spot' ? c.name.replace(/ spot \d+$/, '') : null) : null; }
+    if (!reg || !confData[reg]) reg = VIEW_REGION[store.get('sil.view', 'south')] || 'South coast';
+    const c = confData[reg]; if (!c) return;
+    $('confBtn').hidden = false; $('confBtn').className = 'conf ' + c.level; $('confBtn').textContent = `Picture: ${c.level}`;
+    $('confBtn').title = `${reg}: ${c.why.join('. ')}`;
+    $('confList').innerHTML = Object.entries(confData).map(([r, v]) => `<div class="confRow"><b>${esc(r)}</b><span class="conf ${v.level}">${v.level}</span><ul>${v.why.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`).join('');
+  }
+  $('confBtn').addEventListener('click', () => sheet($('confBtn'), $('confSheet')));
+  getJSON('conditions.json').then(c => { cond = c; if (map.hasLayer(arrowLayer)) drawArrows(); renderConf(); }).catch(() => {});
+  getJSON('weed.json').then(w => { weedData = w; drawWeed(w); $('weedDate').textContent = `${w.patches.length} patches · 3 days to ${w.date}`; }).catch(() => { $('weedDate').textContent = 'not available yet'; });
+  getJSON('confidence.json').then(c => { confData = c; renderConf(); }).catch(() => {});
+  if (store.get('sil.arrows', false)) { $('curArrows').checked = true; arrowLayer.addTo(map); }
+  if (store.get('sil.weed', false)) { $('weedLayer').checked = true; weedLayer.addTo(map); }
+  setInterval(() => { if (map.hasLayer(arrowLayer)) drawArrows(); }, 600000);
 
   // ---------- sheets / tiles
   function sheet(btn, el) { const open = el.hidden; document.querySelectorAll('.sheet').forEach(s => s.hidden = true);

@@ -498,6 +498,20 @@ def main():
         (OUT / 'times.json').write_text(json.dumps(build_times(), separators=(',', ':')))
     except Exception as e:
         log('tide / current times unavailable:', e)
+    try:
+        (OUT / 'conditions.json').write_text(json.dumps(read_conditions(top), separators=(',', ':')))
+    except Exception as e:
+        log('wind / sea / current unavailable:', e)
+    try:
+        (OUT / 'weed.json').write_text(json.dumps(read_weed(depth), separators=(',', ':')))
+    except Exception as e:
+        log('weed unavailable:', e)
+    clear = {}
+    try: _, clear = read_clear_sky(depth)
+    except Exception as e: log('clear sky unavailable:', e)
+    conf = confidence(chl_meta, clear, sst is not None, logs)
+    log('confidence:', {k: v['level'] for k, v in conf.items()})
+    (OUT / 'confidence.json').write_text(json.dumps(conf, indent=1))
     # this build's grid, kept for the track record (scores ×1000 for every shaded square)
     ocean = int(np.count_nonzero(score > 0))
     shaded = [[int(i), int(j), int(round(float(score[i, j]) * 1000))] for i, j in zip(*np.nonzero(score >= .32))]
@@ -506,6 +520,138 @@ def main():
                                                        variants={'no_temp': shaded_alt}), separators=(',', ':')))
     track_record(logs)
     log(f'{len(feats)} squares, top spots {[(t["lat"], t["lon"]) for t in top]}, sources {sources}')
+
+
+# ---------------- wind, sea and current at the banks and top spots
+COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+
+
+def read_conditions(top):
+    """Hourly wind (knots), waves and current for every bank and top spot, from now for 36 hours (Open-Meteo)."""
+    pts = [dict(name=b['name'], kind='bank', lat=float(b['lat']), lon=float(b['lon'])) for b in BANKS if b.get('name')]
+    pts += [dict(name=f"{t['region']} spot {t['rank']}", kind='spot', lat=t['lat'], lon=t['lon']) for t in top]
+    if not pts: raise ValueError('no points')
+    la = ','.join(f"{p['lat']:.4f}" for p in pts); lo = ','.join(f"{p['lon']:.4f}" for p in pts)
+    q = lambda d: urllib.parse.urlencode(d)
+    wind = json.loads(fetch('https://api.open-meteo.com/v1/forecast?' + q({'latitude': la, 'longitude': lo, 'hourly': 'wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+                                                                            'wind_speed_unit': 'kn', 'timezone': 'GMT', 'forecast_days': 3}), timeout=90))
+    time.sleep(2)
+    sea = json.loads(fetch('https://marine-api.open-meteo.com/v1/marine?' + q({'latitude': la, 'longitude': lo, 'hourly': 'wave_height,wave_period,ocean_current_velocity,ocean_current_direction',
+                                                                                'timezone': 'GMT', 'forecast_days': 3, 'cell_selection': 'sea'}), timeout=90))
+    wind = wind if isinstance(wind, list) else [wind]; sea = sea if isinstance(sea, list) else [sea]
+    t_all = wind[0]['hourly']['time']
+    start = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:00')
+    k0 = t_all.index(start) if start in t_all else 0
+    sl = slice(k0, k0 + 36)
+    r1 = lambda v, n=1: [None if x is None else round(float(x), n) for x in v[sl]]
+    r0 = lambda v: [None if x is None else int(round(float(x))) for x in v[sl]]
+    for p, w, m in zip(pts, wind, sea):
+        hw, hm = w.get('hourly', {}), m.get('hourly', {})
+        p.update(wind=r0(hw.get('wind_speed_10m', [])), gust=r0(hw.get('wind_gusts_10m', [])), wdir=r0(hw.get('wind_direction_10m', [])),
+                 wave=r1(hm.get('wave_height', [])), period=r0(hm.get('wave_period', [])),
+                 cur=[None if x is None else round(float(x) / 1.852, 1) for x in (hm.get('ocean_current_velocity') or [])[sl]],   # km/h → knots
+                 cdir=r0(hm.get('ocean_current_direction', [])))
+    return {'built_utc': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'start_utc': t_all[k0] + 'Z', 'points': pts}
+
+
+# ---------------- weed (floating algae) seen by satellite
+AFAI_HOST = 'https://cwcgom.aoml.noaa.gov/erddap/griddap/'
+WEED_MIN = 2.5e-4          # how far above the surrounding water a pixel must be to count as weed
+
+
+def afai(dataset, stride=1):
+    W, E, S, N = MAP_EXTENT
+    url = f'{AFAI_HOST}{dataset}.csv?AFAI[last][({S}):{stride}:({N})][({W}):{stride}:({E})]'
+    rows = [l.split(',') for l in fetch(url, timeout=180).decode().splitlines()[2:]]
+    rows = [r for r in rows if len(r) >= 4]
+    lat = np.array(sorted({float(r[1]) for r in rows})); lon = np.array(sorted({float(r[2]) for r in rows}))
+    li = {v: k for k, v in enumerate(lat)}; oi = {v: k for k, v in enumerate(lon)}
+    a = np.full((len(lat), len(lon)), np.nan)
+    for r in rows:
+        if r[3] not in ('', 'NaN'): a[li[float(r[1])], oi[float(r[2])]] = float(r[3])
+    return rows[0][0][:10], lat, lon, a
+
+
+def water_mask(lat, lon, depth, min_depth=30):
+    """Open water away from reefs and shallows (bottom and surf show up like weed)."""
+    from scipy.interpolate import RegularGridInterpolator
+    LA, LO = np.meshgrid(lat, lon, indexing='ij')
+    if depth is not None:
+        d = RegularGridInterpolator((glat, glon), depth, method='nearest', bounds_error=False, fill_value=np.nan)(np.c_[LA.ravel(), LO.ravel()]).reshape(LA.shape)
+        ok = d > min_depth
+    else:
+        ok = np.ones(LA.shape, bool)
+    from matplotlib.path import Path as MPath
+    flat = np.c_[LO.ravel(), LA.ravel()]; land = np.zeros(LA.shape, bool)
+    for f in coast_geojson()['features']:
+        for ring in polygon_rings(f['geometry']): land |= MPath(np.asarray(ring)).contains_points(flat).reshape(LA.shape)
+    from scipy.ndimage import binary_dilation
+    ok &= ~binary_dilation(land, iterations=2)
+    if BANKS:
+        near = np.zeros(LA.shape, bool)
+        for b in BANKS: near |= nm_between(LA, LO, b['lat'], b['lon']) < BANK_REACH_NM + 10
+        ok &= near
+    return LA, LO, ok
+
+
+def read_weed(depth):
+    """Patches of floating algae (likely weed) from the 3-day satellite composite, as points with a size and strength."""
+    from scipy.ndimage import gaussian_filter, label
+    date, lat, lon, a = afai('noaa_aoml_atlantic_oceanwatch_AFAI_3D')
+    LA, LO, ok = water_mask(lat, lon, depth)
+    valid = np.isfinite(a) & ok
+    w = gaussian_filter(valid.astype(float), 6); bg = gaussian_filter(np.where(valid, a, 0), 6) / np.maximum(w, 1e-6)
+    d = np.where(valid, a - bg, np.nan)
+    hit = np.nan_to_num(d) > WEED_MIN
+    lab, n = label(hit, structure=np.ones((3, 3)))
+    pts = []
+    for k in range(1, n + 1):
+        ii, jj = np.nonzero(lab == k)
+        if len(ii) < 2: continue                         # single pixels are mostly noise
+        pts.append(dict(lat=round(float(LA[ii, jj].mean()), 4), lon=round(float(LO[ii, jj].mean()), 4), size=int(len(ii)),
+                        strength=round(float(np.nanmax(d[ii, jj]) / WEED_MIN), 1)))
+    pts.sort(key=lambda p: -p['size'] * p['strength'])
+    log(f'weed: {date} {int(valid.sum())} clear water pixels, {n} patches, {len(pts)} kept, d99={np.nanpercentile(d, 99):.5f}')
+    return {'date': date, 'patches': pts[:200]}
+
+
+def read_clear_sky(depth):
+    """Share of open water each region's satellites could see on the latest day (the rest was cloud or glare)."""
+    date, lat, lon, a = afai('noaa_aoml_atlantic_oceanwatch_AFAI_1D', stride=2)
+    LA, LO, ok = water_mask(lat, lon, depth)
+    out = {}
+    for reg in REGIONS:
+        sel = ok & (np.vectorize(region_of)(LA, LO) == reg) if BANKS else ok
+        if sel.sum() < 20: continue
+        out[reg] = round(float(np.isfinite(a[sel]).mean()), 2)
+    log('clear sky:', date, out)
+    return date, out
+
+
+# ---------------- how much to trust the picture in each area
+def confidence(chl_meta, clear, have_sst, logs):
+    today = datetime.now(timezone.utc).date()
+    try: age = (today - datetime.strptime(chl_meta['observation_date'], '%Y-%m-%d').date()).days
+    except Exception: age = None
+    now = datetime.now(timezone.utc)
+    out = {}
+    for reg in REGIONS:
+        pts, why = 3, []
+        if age is None: pts -= 2; why.append('Water colour data is missing')
+        elif age >= 4: pts -= 2; why.append(f'Water colour data is {age} days old')
+        elif age >= 2: pts -= 1; why.append(f'Water colour data is {age} days old')
+        if chl_meta.get('status') == 'previous_observation': pts -= 1; why.append('The colour map was not refreshed this time')
+        c = clear.get(reg)
+        if c is not None:
+            if c < .15: pts -= 2; why.append('Cloud hid almost all of this area from the satellites')
+            elif c < .4: pts -= 1; why.append('Cloud hid much of this area from the satellites')
+            else: why.append('Satellites had a clear view')
+        if not have_sst: pts -= 1; why.append('Water temperature is missing this update')
+        recent = [r for r in logs if region_of(r['lat'], r['lon']) == reg and 0 <= (now - r['when']).total_seconds() < 24 * 3600 and r['species'] != 'No strikes here']
+        if recent: pts += 1; why.append('Boats reported fish or bait here in the last day')
+        if age is not None and age < 2 and not any('missing' in w or 'Cloud' in w for w in why): why.insert(0, 'Fresh water colour data')
+        out[reg] = {'level': 'Good' if pts >= 3 else 'Fair' if pts == 2 else 'Poor', 'why': why}
+    return out
 
 
 # ---------------- track record

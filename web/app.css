@@ -59,3 +59,17 @@ dialog input,dialog select{display:block;width:100%;margin-top:4px;min-height:44
 .seenGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
 .seenGrid button{min-height:52px;border-radius:12px;border:1px solid var(--line);background:#12345a;color:var(--ink);font:600 15px inherit}
 .actions button{font-size:14px}
+.conf{margin-top:3px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;font:600 11.5px/1.4 inherit;background:#12345a;color:var(--ink)}
+.conf.Good{background:#1f7a4d;border-color:#1f7a4d}
+.conf.Fair{background:#9a6b00;border-color:#9a6b00}
+.conf.Poor{background:#8c2b2b;border-color:#8c2b2b}
+.boatbar .wide{grid-column:1/-1}
+.confRow{padding:8px 4px;border-bottom:1px solid var(--line)}
+.confRow:last-child{border-bottom:0}
+.confRow b{margin-right:6px}
+.confRow ul{margin:4px 0 0 18px;padding:0;font-size:13px;color:var(--muted)}
+.cond{font-size:13px;line-height:1.45}
+.cond table{border-collapse:collapse;margin-top:4px;font-size:12px}
+.cond td,.cond th{padding:1px 5px;text-align:right;white-space:nowrap}
+.cond th{color:#667;font-weight:600}
+.curArrow{pointer-events:none}
