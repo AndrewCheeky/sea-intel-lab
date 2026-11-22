@@ -11,7 +11,7 @@
   const ddm = (v, p, n) => { const h = v >= 0 ? p : n; v = Math.abs(v); return `${Math.floor(v)}°${((v % 1) * 60).toFixed(1).padStart(4, '0')}′${h}`; };
   const pos2txt = (la, lo) => `${ddm(la, 'N', 'S')} ${ddm(lo, 'E', 'W')}`;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  const store = {get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  const store = {get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)) ?? d; return k === 'sil.view' && v === 'east' ? 'portland' : v; } catch { return d; } },
                  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }};
   function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
 
@@ -29,7 +29,7 @@
   const topMarkers = {};
   const key = (la, lo) => `${Math.floor((la - area.south) / cellDeg)}|${Math.floor((lo - area.west) / cellDeg)}`;
   const CLASSES = [[.9, 'Highest'], [.77, 'High'], [.62, 'Good'], [.47, 'Medium'], [.32, 'Low']];
-  const VIEWS = {south: [[17.45, -77.45], [18.0, -76.25]], east: [[17.3, -76.6], [18.8, -75.4]],
+  const VIEWS = {south: [[17.45, -77.45], [18.0, -76.25]], morant: [[17.15, -76.4], [17.7, -75.55]], portland: [[17.85, -76.95], [18.75, -75.5]],
                  north: [[18.2, -78.6], [18.8, -76.6]], all: [[16.6, -78.9], [19.2, -75.2]]};
 
   async function getJSON(u) { const r = await fetch(u, {cache: 'no-cache'}); if (!r.ok) throw Error(u + ' ' + r.status); return r.json(); }
@@ -237,7 +237,7 @@
   });
 
   // ---------- best times strip: dawn/dusk and solunar periods (worked out on the phone), tide and current turns (from the build)
-  const POINTS = {south: [17.70, -76.88], east: [17.85, -76.15], north: [18.55, -77.60], all: [17.70, -76.88]};
+  const POINTS = {south: [17.70, -76.88], morant: [17.42, -75.98], portland: [18.20, -76.30], north: [18.55, -77.60], all: [17.70, -76.88]};
   let timesData = null, tomorrow = false, BANKLIST = [], showAllTimes = false;
   const hm = d => d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
   const hspan = (a, b) => { const x = hm(a), y = hm(b), ax = x.slice(-2), by = y.slice(-2); return (ax === by && /[AP]M/i.test(ax) ? x.slice(0, -3) : x) + '–' + y; };
@@ -246,7 +246,7 @@
     if (!BANKLIST.length) return [17.95, -76.67];
     return [BANKLIST.reduce((t, b) => t + b.lat, 0) / BANKLIST.length, BANKLIST.reduce((t, b) => t + b.lon, 0) / BANKLIST.length];
   }
-  function regionFor(la, lo) { let best = 'south', bd = 1e9; for (const k of ['south', 'east', 'north']) { const d = nm([la, lo], POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
+  function regionFor(la, lo) { let best = 'south', bd = 1e9; for (const k of ['south', 'morant', 'portland', 'north']) { const d = nm([la, lo], POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
   // Dawn/dusk windows and the major/minor feeding periods for one local day (island-wide), with Prime marked.
   function feeding(day) {
     const [la, lo] = islandCentre(), mid = new Date(day.getTime() + 432e5);
@@ -337,7 +337,7 @@
 
   // ---------- wind, sea and current (from the build) · weed seen by satellite · how much to trust the picture
   let cond = null;
-  const VIEW_REGION = {south: 'South coast', east: 'East & north-east', north: 'North & west', all: 'South coast'};
+  const VIEW_REGION = {south: 'South coast', morant: 'Morant Cays', portland: 'Portland', north: 'North & west', all: 'South coast'};
   function condIndex() {
     if (!cond) return -1;
     const k = Math.floor((Date.now() - Date.parse(cond.start_utc)) / 36e5);
