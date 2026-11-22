@@ -243,6 +243,8 @@ def read_logs():
         try:
             r['when'] = parse_time(r['date']); r['lat'] = float(r['lat']); r['lon'] = float(r['lon'])
             r['count'] = int(r.get('count', 1)); r['species'] = r.get('species', 'Other')
+            note = str(r.get('note') or '')
+            if note.startswith('[seen] ') and note[7:] in SIGHTINGS: r['species'] = note[7:]   # sightings sent to an older sheet script
         except Exception as e:
             log('skipping log', r, e); continue
         k = (r['when'].strftime('%Y%m%d%H%M'), round(r['lat'], 3), round(r['lon'], 3))
