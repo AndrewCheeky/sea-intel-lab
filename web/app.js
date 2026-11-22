@@ -21,6 +21,9 @@
   const COAST_PLAIN = {color: '#b6c9d0', weight: 1, fillColor: '#3b4a55', fillOpacity: 1};
   const COAST_OVER_TILES = {color: '#b6c9d0', weight: 0, fillOpacity: 0};
   const sea = L.layerGroup().addTo(map);
+  // Bank pins and weed dots sit on their own layer above the shaded squares so a tap reaches them.
+  map.createPane('pins').style.zIndex = 450;
+  const pinRenderer = L.svg({pane: 'pins'});
 
   let cells = new Map(), hot = [], meta = {}, area = null, cellDeg = .01, topSpots = [];
   const topMarkers = {};
@@ -54,7 +57,7 @@
       L.rectangle([[la - cellDeg / 2, lo - cellDeg / 2], [la + cellDeg / 2, lo + cellDeg / 2]],
         {renderer: canvas, stroke: false, fillColor: COLORS[p.cls], fillOpacity: OPAC[p.cls]}).on('click', ev => L.popup().setLatLng(ev.latlng).setContent(explain(p)).openOn(map)).addTo(sea);
     }
-    banks.forEach(b => L.circleMarker([b.lat, b.lon], {radius: 5, color: '#fff', weight: 1.5, fillColor: '#e8475f', fillOpacity: 1})
+    banks.forEach(b => L.circleMarker([b.lat, b.lon], {pane: 'pins', renderer: pinRenderer, radius: 5, color: '#fff', weight: 1.5, fillColor: '#e8475f', fillOpacity: 1})
       .bindPopup(() => bankPopup(b), {maxWidth: 300}).addTo(sea));
     rel.forEach(r => L.marker([r.lat, r.lon], {icon: L.divIcon({className: '', html: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="#00e5ff" stroke="#061b33" stroke-width="1.5"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11]}),
       title: 'Release ' + r.date.slice(0, 10)}).bindPopup(`Release ${esc(r.date.slice(0, 10))}<br>${pos2txt(r.lat, r.lon)}${r.note ? '<br>' + esc(r.note) : ''}`).addTo(sea));
@@ -283,8 +286,6 @@
     }).join('') + (hidden ? `<button class="chip more" id="chipMore">+${hidden} more</button>` : showAllTimes ? '<button class="chip more" id="chipMore">Show less</button>' : '');
     $('chips').querySelectorAll('button.chip[data-k]').forEach(b => b.addEventListener('click', () => toast(items[+b.dataset.k].why)));
     const mb = $('chipMore'); if (mb) mb.addEventListener('click', () => { showAllTimes = !showAllTimes; renderTimes(); });
-    const il = Sky.moonIllum(mid);
-    $('moonLine').textContent = `${Sky.phaseName(il.phase)}, ${Math.round(il.fraction * 100)}% lit`;
   }
   function setDay(t) { tomorrow = t; showAllTimes = false; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
   $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
@@ -382,7 +383,7 @@
   const weedLayer = L.layerGroup();
   function drawWeed(w) {
     weedLayer.clearLayers();
-    for (const p of w.patches) L.circleMarker([p.lat, p.lon], {radius: Math.min(3 + Math.sqrt(p.size), 9), color: '#2f5d12', weight: 1, fillColor: '#b6f23a', fillOpacity: .85})
+    for (const p of w.patches) L.circleMarker([p.lat, p.lon], {pane: 'pins', renderer: pinRenderer, radius: Math.min(3 + Math.sqrt(p.size), 9), color: '#2f5d12', weight: 1, fillColor: '#b6f23a', fillOpacity: .85})
       .bindPopup(`<b>Weed seen by satellite</b><br>${pos2txt(p.lat, p.lon)}<br><small>${p.size > 6 ? 'Large patch' : 'Small patch'} · seen in the 3 days to ${esc(w.date)}. It drifts, so look along the current.</small>`).addTo(weedLayer);
   }
   let weedData = null;
