@@ -17,7 +17,9 @@
 
   const map = L.map('map', {zoomControl: true, attributionControl: true, zoomSnap: .5, preferCanvas: true}).setView([17.70, -76.88], 11);
   map.attributionControl.setPrefix(false);
-  let tiles = null;
+  let tiles = null, coastLayer = null;
+  const COAST_PLAIN = {color: '#b6c9d0', weight: 1, fillColor: '#3b4a55', fillOpacity: 1};
+  const COAST_OVER_TILES = {color: '#b6c9d0', weight: 0, fillOpacity: 0};
   const sea = L.layerGroup().addTo(map);
 
   let cells = new Map(), hot = [], meta = {}, area = null;
@@ -36,7 +38,7 @@
     $('sources').textContent = 'Inputs: ' + Object.entries(m.sources || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') +
       ` · weights ${Object.entries(m.weights || {}).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(', ')}` + ` · ${m.releases_used} releases`;
 
-    L.geoJSON(coast, {interactive: false, style: {color: '#b6c9d0', weight: 1, fillColor: '#3b4a55', fillOpacity: 1}}).addTo(sea);
+    coastLayer = L.geoJSON(coast, {interactive: false, style: tiles ? COAST_OVER_TILES : COAST_PLAIN}).addTo(sea);
     L.geoJSON(grid, {
       style: f => ({stroke: false, fillColor: COLORS[f.properties.cls], fillOpacity: OPAC[f.properties.cls]}),
       onEachFeature: (f, layer) => {
@@ -136,6 +138,7 @@
   $('tiles').addEventListener('change', e => {
     if (e.target.checked) tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 15, attribution: '© OpenStreetMap'}).addTo(map).bringToBack();
     else if (tiles) { map.removeLayer(tiles); tiles = null; }
+    if (coastLayer) coastLayer.setStyle(tiles ? COAST_OVER_TILES : COAST_PLAIN);   // the detailed map shows the land itself
     store.set('sil.tiles', e.target.checked);
   });
   if (store.get('sil.tiles', false)) { $('tiles').checked = true; $('tiles').dispatchEvent(new Event('change')); }
