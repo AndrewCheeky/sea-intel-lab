@@ -9,7 +9,7 @@
  * it with the crew. Codes are kept in the "Boats" tab of the logs sheet (Boat | Code | Sharing | Changed | Created by).
  * Boat names must be unique: a second request for the same name is told who created it, to ask them for the code.
  * Sharing is chosen by the boat in the app (and can be changed any time, e.g. off for a tournament):
- *   research – exact positions kept private, used only to improve the map (the default)
+ *   research – the default: only the boat's own crew sees its logs; used privately to improve the map
  *   bank     – Tournament Mode: other anglers see the species, boat and nearest bank only
  *   all      – other anglers see the exact spot
  * STRIKELOG_CODE (Script Properties) still works: it becomes the first boat ("My boat").
@@ -51,6 +51,7 @@ function strikeLogRoute_(e) {
   const boat = strikeLogBoat_(props, String(q.code || ''));
   if (!boat) return json({ok: false, error: 'wrong boat code'});
   if (q.op === 'share') return json(strikeLogShare_(props, boat, q.level));
+  if (q.op === 'team') return json({ok: true, boat: boat.name, share: boat.share || 'research', logs: strikeLogTeam_(props, boat)});
   if (q.del === '1') return json(strikeLogDelete_(props, q, boat));          // the Delete button on a log dot
   const lat = Number(q.lat), lon = Number(q.lon), count = Math.round(Number(q.count));
   const B = STRIKELOG.BOX;
@@ -79,7 +80,7 @@ function strikeLogRoute_(e) {
   } finally {
     lock.releaseLock();
   }
-  return json({ok: true, boat: boat.name, share: boat.share});
+  return json({ok: true, boat: boat.name, share: boat.share || 'research'});
 }
 
 /** The Boats tab: one row per boat code. Created the first time, with STRIKELOG_CODE as "My boat". */
@@ -131,9 +132,9 @@ function strikeLogCreateBoat_(props, name, by) {
     let code = '';
     do { code = ''; for (let i = 0; i < 8; i++) code += ABC[Math.floor(Math.random() * ABC.length)]; code = code.slice(0, 4) + '-' + code.slice(4); }
     while (codes.indexOf(code) >= 0);
-    strikeLogBoatsSheet_(props).appendRow([unique, code, '', new Date().toISOString(), by]);
+    strikeLogBoatsSheet_(props).appendRow([unique, code, 'research', new Date().toISOString(), by]);   // default: crew only
     props.setProperty('STRIKELOG_NEWBOATS_' + today, String(n + 1));
-    return {ok: true, boat: unique, code: code, share: ''};
+    return {ok: true, boat: unique, code: code, share: 'research'};
   } finally {
     lock.releaseLock();
   }
@@ -141,7 +142,7 @@ function strikeLogCreateBoat_(props, name, by) {
 
 /** Read (no level) or set the boat's sharing choice. Applies to every phone and every log of that boat. */
 function strikeLogShare_(props, boat, level) {
-  if (level === undefined || level === '') return {ok: true, boat: boat.name, share: boat.share};
+  if (level === undefined || level === '') return {ok: true, boat: boat.name, share: boat.share || 'research'};
   level = String(level);
   if (STRIKELOG.SHARES.indexOf(level) < 0) return {ok: false, error: 'bad sharing level'};
   strikeLogBoatsSheet_(props).getRange(boat.row, 3, 1, 2).setValues([[level, new Date().toISOString()]]);
@@ -167,6 +168,13 @@ function strikeLogDelete_(props, q, boat) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/** The boat's own logs from the last 14 days, exact positions, for its crew's phones only. */
+function strikeLogTeam_(props, boat) {
+  const since = Date.now() - 14 * 86400000;
+  return strikeLogRows_(props).filter(r => r.boat === boat.name && Date.parse(r.date) >= since)
+    .map(r => ({id: r.id, date: r.date, lat: r.lat, lon: r.lon, species: r.species, count: r.count, note: r.note}));
 }
 
 function strikeLogRows_(props) {

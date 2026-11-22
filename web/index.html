@@ -120,7 +120,7 @@
     <div id="newCode" class="newCode" hidden>
       <p>Code for <b id="newBoatTxt"></b>:</p>
       <p class="bigCode" id="newCodeTxt"></p>
-      <p class="small">Share it only with your crew and people you trust. Anyone with it logs as your boat.</p>
+      <p class="small">Share it only with your crew and people you trust. Anyone with it logs as your boat and sees your boat's catches. Sharing starts as Research (crew only); change it under More → Sharing.</p>
       <button id="shareCodeBtn">Share with crew</button>
     </div>
     <div class="dlgBtns"><button id="leaveBtn">Remove from this phone</button><button id="codeDoneBtn" class="primary">Done</button></div>
@@ -129,10 +129,10 @@
 
 <dialog id="shareDlg">
   <form method="dialog">
-    <h2>Share your catches? <small id="shareBoat"></small></h2>
-    <p class="small">Your exact positions are always kept private and used only to make the map more accurate. Choose what other anglers can see. You can change this any time, for example turn it off for a tournament and share afterwards. It applies to every phone using your boat code and to all your boat's logs.</p>
+    <h2>Who sees your catches? <small id="shareBoat"></small></h2>
+    <p class="small">Your crew always sees your boat's catches. Exact positions are otherwise kept private and used only to make the map more accurate. Choose what other boats can see. You can change this any time, for example turn it off for a tournament and share afterwards. It applies to every phone using your boat code and to all your boat's logs.</p>
     <div class="shareOpts">
-      <button value="research"><b>Research only</b><small>Nobody else sees your catches</small></button>
+      <button value="research"><b>Research</b> <small>Default. Only your crew sees your catches</small></button>
       <button value="bank"><b>Tournament Mode</b><small>Others see the fish, your boat and the nearest bank, not the spot</small></button>
       <button value="all"><b>Everything</b><small>Others see your boat and the exact spot</small></button>
     </div>
@@ -160,6 +160,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>
