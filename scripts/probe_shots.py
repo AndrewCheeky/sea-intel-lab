@@ -15,8 +15,12 @@ async def main():
         await pg.evaluate("document.querySelectorAll('.sheet').forEach(s=>s.hidden=true)")
         await pg.evaluate("for (const id of ['curArrows','weedLayer']) { const e=document.getElementById(id); e.checked=true; e.dispatchEvent(new Event('change')); }")
         await pg.select_option('#areaSel', 'south'); await pg.wait_for_timeout(1200); await pg.screenshot(path='shots/2-arrows-weed.png')
-        await pg.evaluate("window.dispatchEvent(new Event('resize'))")
+        await pg.evaluate("document.querySelectorAll('.leaflet-interactive').forEach(e=>{})")
+        # tap the Mackerel (Bowditch) bank pin
+        pt = await pg.evaluate("(() => { const m = document.querySelector('#map'); return null; })()")
         await pg.click('#boatBtn'); await pg.wait_for_timeout(1500)
+        await pg.screenshot(path='shots/3-boat.png')
+        await pg.evaluate("document.getElementById('areaSel').value='south';document.getElementById('areaSel').dispatchEvent(new Event('change'))"); await pg.wait_for_timeout(800)
         print('sea here:', await pg.inner_text('#seaHere'))
         await pg.screenshot(path='shots/3-boat.png')
         print('errors:', errs); await b.close()

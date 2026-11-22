@@ -21,6 +21,7 @@ jobs:
           cp -r tmp/package/dist/leaflet.js tmp/package/dist/leaflet.css tmp/package/dist/images site/vendor/leaflet/
           python scripts/smoke_test.py site
           python scripts/probe_shots.py site
+          for f in shots/*.png; do python3 -c "import sys,base64;from PIL import Image;im=Image.open(sys.argv[1]).convert('RGB');im.save('/tmp/x.jpg',quality=70);print('IMG',sys.argv[1],base64.b64encode(open('/tmp/x.jpg','rb').read()).decode())" $f; done
           head -c 600 site/conditions.json; echo; head -c 800 site/weed.json; echo; cat site/confidence.json
       - uses: actions/upload-artifact@v4
         with: {name: shots, path: 'shots/*.png'}
