@@ -27,7 +27,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: cache
-          key: etopo-v1
+          key: etopo-${{ hashFiles('scripts/build_grid.py') }}
+          restore-keys: etopo-
       - name: Build grid
         env:
           SOURCE_SITE: ${{ vars.SOURCE_SITE || 'https://andrewcheeky.github.io/jamaica-marine-currents/' }}
