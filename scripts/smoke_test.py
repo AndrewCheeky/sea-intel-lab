@@ -41,13 +41,13 @@ async def main():
         await pg.evaluate("document.querySelectorAll('.sheet').forEach(s => s.hidden = true)")
         seen = await pg.query_selector('.seen'); deleted = None
         if seen:
-            await seen.click(); await pg.wait_for_timeout(400)
+            await seen.dispatch_event('click'); await pg.wait_for_timeout(400)
             btn = await pg.query_selector('.leaflet-popup .delLog')
             if btn: await btn.click(); await pg.wait_for_timeout(600)
             bird_gone = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 1 && !document.querySelector('.seen')")
             green = await pg.query_selector('path[fill="#2ee66b"]')
             if bird_gone and green:
-                await green.click(); await pg.wait_for_timeout(400)
+                await green.dispatch_event('click'); await pg.wait_for_timeout(400)
                 print('strike popup:', (await pg.inner_text('.leaflet-popup-content'))[:80].replace(chr(10), ' / '))
                 btn = await pg.query_selector('.leaflet-popup .delLog')
                 if btn: await btn.click(); await pg.wait_for_timeout(600)
