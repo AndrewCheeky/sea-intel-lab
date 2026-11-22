@@ -258,8 +258,7 @@
       return `<button class="${cls}" data-k="${k}" title="${esc(it.why)}">${it.prime ? 'Prime · ' : ''}${esc(it.label)}</button>`;
     }).join('') + info.map(i => `<span class="chip info" title="Moon times, for information">${esc(i.label)}</span>`).join('');
     $('chips').querySelectorAll('button.chip').forEach(b => b.addEventListener('click', () => toast(items[+b.dataset.k].why)));
-    const range = P && P.tide_range_m != null ? (P.tide_range_m < .5 ? ' · Tides are small here, so dawn and dusk matter most' : '') : (timesData ? '' : ' · Tide and current times load with signal');
-    $('moonLine').textContent = `${Sky.phaseName(il.phase)}, ${Math.round(il.fraction * 100)}% lit · ${{south: 'South coast', east: 'East', north: 'North coast'}[pk]}${range}`;
+    $('moonLine').textContent = `${Sky.phaseName(il.phase)}, ${Math.round(il.fraction * 100)}% lit`;
   }
   function setDay(t) { tomorrow = t; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
   $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
