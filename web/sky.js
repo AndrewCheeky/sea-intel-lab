@@ -45,9 +45,26 @@
     }
     return out;
   }
+  // Solunar periods: majors centred on moon overhead and underfoot (about 2 hours), minors on moonrise and moonset (about 1 hour).
+  // Uses true turning points and horizon crossings found in 5-minute steps either side of the day.
+  function solunar(dayStart, lat, lng) {
+    const t0 = dayStart.getTime() - 3 * 36e5, t1 = dayStart.getTime() + 27 * 36e5, step = 3e5, ev = [];
+    let a = moonAlt(new Date(t0 - step), lat, lng), b = moonAlt(new Date(t0), lat, lng);
+    for (let t = t0 + step; t <= t1; t += step) {
+      const c = moonAlt(new Date(t), lat, lng), tb = new Date(t - step);
+      if (b > a && b >= c) ev.push({kind: 'major', what: 'overhead', at: tb});
+      if (b < a && b <= c) ev.push({kind: 'major', what: 'underfoot', at: tb});
+      if (b < 0 && c >= 0) ev.push({kind: 'minor', what: 'rise', at: new Date(t - step * (c / (c - b)))});
+      if (b >= 0 && c < 0) ev.push({kind: 'minor', what: 'set', at: new Date(t - step * (c / (c - b)))});
+      a = b; b = c;
+    }
+    const end = dayStart.getTime() + 864e5;
+    return ev.map(e => { const h = e.kind === 'major' ? 36e5 : 18e5; return {...e, start: new Date(+e.at - h), end: new Date(+e.at + h)}; })
+      .filter(e => e.at >= dayStart && e.at < end).sort((x, y) => x.at - y.at);
+  }
   function phaseName(p) {
     return p < .03 || p > .97 ? 'New moon' : p < .22 ? 'Waxing crescent' : p < .28 ? 'First quarter' : p < .47 ? 'Waxing gibbous'
       : p < .53 ? 'Full moon' : p < .72 ? 'Waning gibbous' : p < .78 ? 'Last quarter' : 'Waning crescent';
   }
-  window.Sky = {sunTimes, moonDay, moonIllum, phaseName};
+  window.Sky = {sunTimes, moonDay, solunar, moonIllum, phaseName};
 })();
