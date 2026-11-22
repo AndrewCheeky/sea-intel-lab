@@ -131,7 +131,12 @@ def read_depth():
     """ETOPO 1-arc-minute depth from NOAA ERDDAP; returns (depth_m positive down, slope m/km) on the grid."""
     q = (f"altitude%5B({AREA['south'] - .05}):1:({AREA['north'] + .05})%5D"
          f"%5B({AREA['west'] - .05}):1:({AREA['east'] + .05})%5D")
-    txt = fetch('https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.csv?' + q, timeout=90).decode()
+    cache = ROOT / 'cache' / 'etopo.csv'                 # depth never changes: fetch once, then reuse (kept by actions/cache)
+    if cache.exists() and cache.stat().st_size > 1000:
+        txt = cache.read_text()
+    else:
+        txt = fetch('https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.csv?' + q, timeout=90).decode()
+        cache.parent.mkdir(exist_ok=True); cache.write_text(txt)
     rows = list(csv.reader(io.StringIO(txt)))[2:]
     lat = np.array(sorted({float(r[0]) for r in rows})); lon = np.array(sorted({float(r[1]) for r in rows}))
     z = np.full((len(lat), len(lon)), np.nan)
