@@ -624,11 +624,11 @@
   map.on('click', () => document.querySelectorAll('.sheet').forEach(s => s.hidden = true));
   $('tiles').addEventListener('change', e => {
     if (e.target.checked) {
-      // CARTO street tiles (free for websites, no key); fall back to OpenStreetMap if they fail to load
-      const opts = {maxZoom: 15, referrerPolicy: 'strict-origin-when-cross-origin', crossOrigin: true};
+      // Esri World Street Map (no key needed); fall back to OpenStreetMap if it fails to load
+      const opts = {maxZoom: 15, referrerPolicy: 'strict-origin-when-cross-origin'};
       let fails = 0;
-      tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        {...opts, subdomains: 'abcd', attribution: '© OpenStreetMap contributors © CARTO'}).addTo(map).bringToBack();
+      tiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        {...opts, attribution: 'Tiles © Esri, HERE, Garmin, © OpenStreetMap contributors'}).addTo(map).bringToBack();
       tiles.on('tileerror', () => {
         if (++fails !== 6 || !tiles) return;
         map.removeLayer(tiles);
