@@ -221,7 +221,7 @@
   $('seenDlg').addEventListener('close', () => {
     const v = $('seenDlg').returnValue; if (!SIGHT.includes(v) || !seenPos) return;
     const logs = store.get(LOGS, []);
-    logs.push({id: newId(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '', exact: !!last, synced: false});
+    logs.push({id: newId(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '[seen] ' + v, exact: !!last, synced: false});
     store.set(LOGS, logs); drawMyLogs(); drawSightings(); toast(`${v} logged`); sendPending();
   });
 
