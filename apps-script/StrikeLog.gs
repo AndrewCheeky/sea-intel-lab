@@ -1,7 +1,7 @@
 /**
  * Strike grid – release logging (for the Sea Intel Lab live map)
  * --------------------------------------------------------------
- * The live map's "Log release" button sends each log here; they are kept in a Google Sheet
+ * The live map's "Log release" button sends each log here (and its Delete button removes one); they are kept in a Google Sheet
  * ("Strike grid logs", created the first time). The lab's GitHub build reads them back with a
  * private key, scores each one against the grid that was published BEFORE it, and shows the hit rate.
  *
@@ -40,6 +40,7 @@ function strikeLogRoute_(e) {
   // action=strikelog: add one log
   const code = props.getProperty('STRIKELOG_CODE') || '';
   if (!code || String(q.code || '') !== code) return json({ok: false, error: 'wrong logging code'});
+  if (q.del === '1') return json(strikeLogDelete_(props, q));          // the Delete button on a log dot
   const lat = Number(q.lat), lon = Number(q.lon), count = Math.round(Number(q.count));
   const B = STRIKELOG.BOX;
   if (!(lat > B.south && lat < B.north && lon > B.west && lon < B.east)) return json({ok: false, error: 'position outside the area'});
@@ -68,6 +69,23 @@ function strikeLogRoute_(e) {
     lock.releaseLock();
   }
   return json({ok: true});
+}
+
+/** Removes one log by its id (only phones with the logging code can do this). */
+function strikeLogDelete_(props, q) {
+  const id = String(q.id || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 40);
+  if (!id) return {ok: false, error: 'missing id'};
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return {ok: false, error: 'busy, try again'};
+  try {
+    const sh = strikeLogSheet_(props), last = sh.getLastRow();
+    if (last < 2) return {ok: true, notFound: true};
+    const ids = sh.getRange(2, 9, last - 1, 1).getValues().map(r => String(r[0]));
+    for (let k = ids.length - 1; k >= 0; k--) if (ids[k] === id) { sh.deleteRow(k + 2); return {ok: true, deleted: true}; }
+    return {ok: true, notFound: true};
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function strikeLogRows_(props) {

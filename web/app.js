@@ -126,10 +126,24 @@
   const LOG_URL = 'https://script.google.com/macros/s/AKfycbzwP_tF1SeJIBgB7HxTRBi374NiF0tQXGcSBFUk7EPPu1rSAepDsALW-iHeny6yo1Y/exec';   // marine Apps Script
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9-]/g, '');
   const myLayer = L.layerGroup().addTo(map);
+  // ---------- delete one of your own logs (from the phone and, if already sent, from the sheet)
+  const DELS = 'sil.deletes', HIDDEN = 'sil.hidden';
+  const logKey = (time, lat) => `${String(time).slice(0, 16)}|${Number(lat).toFixed(3)}`;
+  const delBtn = l => `<br><button class="delLog" data-id="${esc(l.id || '')}" data-time="${esc(l.time)}">Delete this log</button>`;
+  function deleteLog(id, time) {
+    const all = store.get(LOGS, []), l = all.find(x => (id && x.id === id) || x.time === time); if (!l) return;
+    if (!confirm(`Delete "${l.species}" logged ${new Date(l.time).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}?`)) return;
+    store.set(LOGS, all.filter(x => x !== l && !(x.id && x.id === l.id)));
+    const hidden = store.get(HIDDEN, []); hidden.push(logKey(l.time, l.lat)); store.set(HIDDEN, hidden.slice(-200));
+    if (l.synced && l.id) { const d = store.get(DELS, []); if (!d.includes(l.id)) d.push(l.id); store.set(DELS, d); }
+    map.closePopup(); drawMyLogs(); drawSightings(); toast('Log deleted'); sendPending();
+  }
+  map.on('popupopen', e => { const b = e.popup.getElement().querySelector('.delLog'); if (b) b.addEventListener('click', () => deleteLog(b.dataset.id, b.dataset.time)); });
+
   function drawMyLogs() {
     myLayer.clearLayers(); const logs = store.get(LOGS, []);
     logs.forEach(l => L.circleMarker([l.lat, l.lon], {radius: 6, color: '#061b33', weight: 2, fillColor: l.count === 0 ? '#9aa5b1' : '#00e5ff', fillOpacity: 1})
-      .bindPopup(`${esc(l.species)} × ${l.count}<br>${new Date(l.time).toLocaleString()}<br>${pos2txt(l.lat, l.lon)}${l.note ? '<br>' + esc(l.note) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>`).addTo(myLayer));
+      .bindPopup(`${esc(l.species)} × ${l.count}<br>${new Date(l.time).toLocaleString()}<br>${pos2txt(l.lat, l.lon)}${l.note ? '<br>' + esc(l.note) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>${delBtn(l)}`).addTo(myLayer));
     const waiting = logs.filter(l => !l.synced).length;
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
     $('codeState').textContent = store.get(CODE, '') ? 'set' : 'not set';
@@ -158,6 +172,13 @@
     const code = store.get(CODE, ''); if (!code || sending || !navigator.onLine) return;
     sending = true;
     try {
+      for (const id of store.get(DELS, [])) {
+        let j = null;
+        try { const r = await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', del: '1', code, id})}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }
+        if (j && j.ok) store.set(DELS, store.get(DELS, []).filter(x => x !== id));
+        else if (j && /code/.test(j.error || '')) { toast('Logging code not accepted – check it under More'); break; }
+        else break;
+      }
       for (const l of store.get(LOGS, []).filter(x => !x.synced)) {
         if (!l.id) l.id = newId();
         const q = new URLSearchParams({action: 'strikelog', code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0'});
@@ -213,14 +234,14 @@
   async function drawSightings() {
     sightLayer.clearLayers();
     let list = []; try { list = await getJSON('sightings.json'); } catch {}
-    const mine = store.get(LOGS, []).filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species}));
-    const seen = new Set();
+    const mine = store.get(LOGS, []).filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l}));
+    const seen = new Set(store.get(HIDDEN, []).map(k => k));
     for (const s of [...mine, ...list]) {
-      const age = (Date.now() - new Date(s.date)) / 36e5, k = `${s.date.slice(0, 16)}|${s.lat.toFixed(3)}`;
+      const age = (Date.now() - new Date(s.date)) / 36e5, k = logKey(s.date, s.lat);
       if (age > 24 || age < -1 || seen.has(k)) continue; seen.add(k);
       L.marker([s.lat, s.lon], {zIndexOffset: 600, icon: L.divIcon({className: 'seen', iconSize: [24, 24], iconAnchor: [12, 12],
         html: `<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="opacity:${Math.max(.35, 1 - age / 24)}"><circle cx="12" cy="12" r="10" fill="#7CFC9A" stroke="#061b33" stroke-width="2"/><path d="M6 13c2-2 4-2 6 0 2-2 4-2 6 0" fill="none" stroke="#061b33" stroke-width="2" stroke-linecap="round"/></svg>`})})
-        .bindPopup(`<b>${esc(s.what)}</b><br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${pos2txt(s.lat, s.lon)}`).addTo(sightLayer);
+        .bindPopup(`<b>${esc(s.what)}</b><br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : ''}`).addTo(sightLayer);
     }
   }
   const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];
