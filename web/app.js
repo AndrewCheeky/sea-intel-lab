@@ -37,9 +37,9 @@
     meta = m; area = grid.area; cellDeg = grid.cell;
     const built = new Date(m.built_utc);
     $('built').textContent = `Built ${built.toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'})}` +
-      (m.chlorophyll_date ? ` · chlorophyll ${m.chlorophyll_date}` : '') + (Date.now() - built > 18 * 3600e3 ? ' · may be out of date' : '');
-    $('sources').textContent = 'Inputs: ' + Object.entries(m.sources || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') +
-      ` · weights ${Object.entries(m.weights || {}).map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join(', ')}` + ` · ${m.releases_used} releases`;
+      (m.sea_date ? ` · sea data from ${new Date(m.sea_date + 'T12:00:00').toLocaleDateString([], {month: 'short', day: 'numeric'})}` : '') +
+      (Date.now() - built > 18 * 3600e3 ? ' · may be out of date' : '');
+    $('sources').textContent = `Updated with the latest sea conditions${m.releases_used ? ` and ${m.releases_used} recent release${m.releases_used === 1 ? '' : 's'}` : ''}.`;
 
     coastLayer = L.geoJSON(coast, {interactive: false, style: tiles ? COAST_OVER_TILES : COAST_PLAIN}).addTo(sea);
     const canvas = L.canvas({padding: .3});
@@ -57,20 +57,20 @@
     rel.forEach(r => L.marker([r.lat, r.lon], {icon: L.divIcon({className: '', html: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="#00e5ff" stroke="#061b33" stroke-width="1.5"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11]}),
       title: 'Release ' + r.date.slice(0, 10)}).bindPopup(`Release ${esc(r.date.slice(0, 10))}<br>${pos2txt(r.lat, r.lon)}${r.note ? '<br>' + esc(r.note) : ''}`).addTo(sea));
     top.forEach(t => L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: `${t.region || ''} top ${t.rank}`, zIndexOffset: 500})
-      .bindPopup(`<b>${esc(t.region || '')} · top ${t.rank}</b><br>${pos2txt(t.lat, t.lon)}<br>Score ${t.score.toFixed(2)}`).addTo(sea));
+      .bindPopup(`<b>${esc(t.region || '')} · spot ${t.rank}</b><br>${pos2txt(t.lat, t.lon)}`).addTo(sea));
     const v = store.get('sil.view', 'south'); $('areaSel').value = v; map.fitBounds(VIEWS[v] || VIEWS.south);
     drawMyLogs();
   }
 
   function explain(p) {
-    const r = [];
-    if (p.depth_m != null) r.push(`Depth about ${p.depth_m} m`);
-    r.push(p.drop >= .6 ? 'On the drop-off' : p.drop >= .3 ? 'Near the drop-off' : 'Away from the drop-off');
-    if (p.front_nm != null) r.push(`${p.front_nm} NM from a chlorophyll front`);
-    if (p.release_nm != null) r.push(`${p.release_nm} NM from a past release`);
-    if (p.zoo_nm != null) r.push(`${p.zoo_nm} NM from a zooplankton line`);
-    if (p.conv_nm != null && p.conv_nm < 30) r.push(`${p.conv_nm} NM from convergence`);
-    return `<b>${p.cls}</b> (score ${p.score.toFixed(2)})<br>${pos2txt(p.lat, p.lon)}<br><small>${r.join('<br>')}</small>`;
+    const r = [], near = (v, d) => v != null && v <= d;
+    if (p.drop >= .6) r.push('On the drop-off'); else if (p.drop >= .3) r.push('Near the drop-off');
+    if (near(p.front_nm, 1.5)) r.push('Green-to-blue water line close by'); else if (near(p.front_nm, 3)) r.push('Green-to-blue water line nearby');
+    if (near(p.zoo_nm, 2.5)) r.push('Bait likely nearby');
+    if (near(p.conv_nm, 3)) r.push('Current line nearby');
+    if (near(p.release_nm, 3)) r.push('Recent catch nearby');
+    if (!r.length) r.push('Not much going for it today');
+    return `<b>${p.cls}</b><br>${pos2txt(p.lat, p.lon)}<br><small>${r.join('<br>')}</small>`;
   }
 
   // ---------- boat
@@ -174,7 +174,7 @@
         (t.not_scored ? ` ${t.not_scored} earlier log${t.not_scored > 1 ? 's' : ''} not counted.` : '');
     $('trackList').innerHTML = t.entries.slice(-12).reverse().map(e =>
       `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count}${e.region ? ' · ' + esc(e.region) : ''} · ` +
-      (e.scored ? `<b>${esc(e.cls)}</b> (${e.score.toFixed(2)})` : 'not counted') + '</li>').join('');
+      (e.scored ? `<b>${esc(e.cls)}</b>` : 'not counted') + '</li>').join('');
   }
   $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
 
@@ -221,7 +221,7 @@
       contourLayer = L.geoJSON(gj, {interactive: true,
         style: f => ({color: DEPTH_COLORS[f.properties.depth_m] || '#5cc8ff', weight: f.properties.depth_m === 200 ? 2.6 : 1.3, opacity: f.properties.depth_m === 200 ? 1 : .85, dashArray: f.properties.depth_m >= 1000 ? '5 4' : null}),
         onEachFeature: (f, l) => l.bindTooltip(`${f.properties.depth_m} m (${Math.round(f.properties.depth_m * 3.281)} ft)`, {sticky: true})});
-      contourLayer.bindPopup(`Depth lines: ${levels.join(', ')} m<br><small>${esc((gj.properties || {}).source || '')} · approximate, not soundings</small>`);
+      contourLayer.bindPopup(`Depth lines: ${levels.join(', ')} m<br><small>Approximate – use your chart for real depths</small>`);
     }
     contourLayer.addTo(map); labelLayer.addTo(map); drawDepthLabels();
   }

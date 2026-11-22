@@ -398,12 +398,11 @@ def main():
     chl_meta = {}
     try: chl_meta = json.loads(fetch(BASE + 'chlorophyll.json'))
     except Exception: pass
-    meta = dict(built_utc=built, area=AREA, cell_deg=CELL, weights={k: round(v / tot, 3) for k, v in used.items()},
-                sources=sources, chlorophyll_date=chl_meta.get('observation_date'), zooplankton_date=chl_meta.get('zooplankton_date'),
-                currents_valid_utc=feat_props.get('currents_valid_utc'), releases_used=len(rel), source_site=BASE,
-                note='Relative ranking of conditions. Not a probability, not a fish forecast, not for navigation.')
-    (OUT / 'grid.json').write_text(json.dumps(dict(area=AREA, cell=CELL, fields=['i', 'j', 'score', 'depth_m', 'drop', 'front_nm', 'zoo_nm', 'conv_nm', 'release_nm'],
-                                                   rows=rows), separators=(',', ':')))
+    # public: when it was built and how fresh the sea data is – nothing about how the score is made
+    meta = dict(built_utc=built, sea_date=chl_meta.get('observation_date'), releases_used=len(rel),
+                note='A guide to where to start looking, not a promise of fish. Not for navigation.')
+    log('inputs used:', sources)
+    (OUT / 'grid.json').write_text(json.dumps(dict(area=AREA, cell=CELL, rows=rows), separators=(',', ':')))
     (OUT / 'top-spots.json').write_text(json.dumps(top, indent=1))
     # public page: date, species and position only (notes stay in the private sheet)
     (OUT / 'releases.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
@@ -515,8 +514,7 @@ def write_kml(feats, top, rel, meta):
     colors = {'Highest': 'c8400080', 'High': 'b41a1ad9', 'Good': '9a1a80ff', 'Medium': '7333d9ff', 'Low': '4766f2ff'}
     out = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
            f'<name>Marlin strike grid – built {meta["built_utc"]}</name>',
-           '<description>Relative ranking of conditions (drop-off, chlorophyll front, past releases, zooplankton, convergence). '
-           'Not a probability, not a fish forecast, not for navigation.</description>']
+           '<description>A guide to where to start looking, not a promise of fish. Not for navigation.</description>']
     for c, col in colors.items():
         out.append(f'<Style id="{c}"><LineStyle><color>00ffffff</color><width>0</width></LineStyle><PolyStyle><color>{col}</color><outline>0</outline></PolyStyle></Style>')
     out.append('<Style id="top"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle></Style>')
