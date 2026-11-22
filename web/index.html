@@ -7,13 +7,14 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=12">
+<link rel="stylesheet" href="app.css?v=13">
 </head>
 <body>
 <header class="top">
   <div class="title">
     <strong>Marlin strike grid</strong> <span class="lab">LAB</span>
     <div id="built" class="sub">Loading…</div>
+    <button id="confBtn" class="conf" aria-expanded="false" hidden>Picture: –</button>
   </div>
   <label class="area"><span class="vh">Area</span>
     <select id="areaSel">
@@ -38,6 +39,7 @@
   <div><span class="k">You</span> <b id="pos">–</b></div>
   <div><span class="k">Square</span> <b id="here">–</b></div>
   <div><span class="k">Best nearby</span> <b id="best">–</b></div>
+  <div class="wide" id="seaRow" hidden><span class="k">Sea here</span> <b id="seaHere">–</b></div>
 </section>
 
 <nav class="actions">
@@ -52,6 +54,8 @@
   <a class="row" href="strike-grid.kml" download>Download KML <small>Google Earth / My Maps</small></a>
   <a class="row" href="top-spots.gpx" download>Download GPX <small>Top spots for Navionics</small></a>
   <label class="row"><input type="checkbox" id="contours"> Depth lines <small>200 m = edge of the shelf</small></label>
+  <label class="row"><input type="checkbox" id="curArrows"> Current arrows <small>which way the water is running</small></label>
+  <label class="row"><input type="checkbox" id="weedLayer"> Weed seen by satellite <small id="weedDate">last 3 days</small></label>
   <label class="row"><input type="checkbox" id="tiles"> Detailed background map <small>needs signal</small></label>
   <button class="row" id="trackBtn">Track record <small id="trackShort">–</small></button>
   <button class="row" id="codeBtn">Logging code <small id="codeState">not set</small></button>
@@ -66,6 +70,12 @@
   Logs from before tracking started are listed but not counted.</p>
 </div>
 
+<div id="confSheet" class="sheet info" hidden>
+  <h2>How much to trust today's picture</h2>
+  <div id="confList"></div>
+  <p class="small">Fresh, clear satellite views make the shading more reliable. When it says Fair or Poor, trust what you see on the water first.</p>
+</div>
+
 <div id="info" class="sheet info" hidden>
   <h2>How to read it</h2>
   <div class="legend">
@@ -76,7 +86,7 @@
   <p>Each square is about half a mile across. The darker the square, the more of the things marlin like come together there:
   the drop-off, the line where green water meets blue, temperature breaks and cooler water edges, bait, current lines, and recent catches.
   <b>It's a guide to where to start looking, not a promise of fish.</b></p>
-  <p>Numbered circles are the best spots in each area. Stars are recent releases. Tap a square to see what it has going for it.</p>
+  <p>Red dots are the banks: tap one for wind, sea and current. Numbered circles are the best spots in each area. Stars are recent releases. Tap a square to see what it has going for it.</p>
   <p id="sources" class="small"></p>
   <p class="small">Experimental. Positions are approximate, so always navigate with your chart and chartplotter.
   Your boat position stays on your phone. Only the releases you log are sent, to your own private sheet, and only after you enter a logging code.</p>
@@ -110,6 +120,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
