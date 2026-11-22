@@ -3,7 +3,7 @@
 Reads the LIVE Sea Intelligence site's published files (never changes that site), adds depth and logged
 releases, and writes a relative score for every ~0.6 NM square south of Kingston:
 
-  site/grid.geojson      shaded squares (score 0–1, class, reasons)
+  site/grid.json         shaded squares (compact rows: i, j, score, reasons)
   site/top-spots.json    best squares, at least 2 NM apart
   site/strike-grid.kml   for Google Earth / Google My Maps
   site/top-spots.gpx     waypoints for Navionics and chartplotters
@@ -23,7 +23,7 @@ DATA = ROOT / 'data'
 BASE = os.getenv('SOURCE_SITE', 'https://andrewcheeky.github.io/jamaica-marine-currents/').rstrip('/') + '/'
 
 # Area scored (south coast around Kingston); cell size in degrees (~0.6 NM)
-AREA = dict(west=-77.40, east=-76.20, south=17.30, north=18.00)
+AREA = dict(west=-79.50, east=-74.50, south=16.00, north=20.00)   # same area as the Fishing Intelligence map
 CELL = 0.01
 WEIGHTS = dict(drop=.30, front=.30, release=.20, zoo=.15, conv=.05)
 SIGMA_NM = dict(drop=2.0, front=2.5, release=3.0, zoo=2.5, conv=3.0)
@@ -61,27 +61,24 @@ def nm_between(lat1, lon1, lat2, lon2):
 
 
 def dist_to_points(P):
+    """Distance (NM) from every square to the nearest of the points (lat, lon)."""
+    from scipy.spatial import cKDTree
     if P is None or not len(P): return np.full(GLAT.shape, 999.0)
-    P = np.asarray(P)
-    P = P[(P[:, 0] > AREA['south'] - .3) & (P[:, 0] < AREA['north'] + .3) & (P[:, 1] > AREA['west'] - .3) & (P[:, 1] < AREA['east'] + .3)]
-    if not len(P): return np.full(GLAT.shape, 999.0)
-    P = P[:: max(1, len(P) // 5000)]
-    d = np.full(GLAT.shape, 1e9)
-    for la, lo in P: d = np.minimum(d, nm_between(GLAT, GLON, la, lo))
-    return d
+    P = np.asarray(P, float)
+    tree = cKDTree(np.c_[P[:, 0] * 60, P[:, 1] * 60 * COS])
+    d, _ = tree.query(np.c_[GLAT.ravel() * 60, GLON.ravel() * 60 * COS], distance_upper_bound=60)
+    return np.minimum(d, 999.0).reshape(GLAT.shape)
 
 
 def dist_to_lines(lines):
-    d = np.full(GLAT.shape, 999.0)
+    """Distance (NM) to the nearest line, by densifying the lines into points ~0.2 NM apart."""
+    pts = []
     for L in lines:
         L = np.asarray(L, float)
         for (a1, o1), (a2, o2) in zip(L[:-1], L[1:]):
-            px, py = (GLON - o1) * 60 * COS, (GLAT - a1) * 60
-            vx, vy = (o2 - o1) * 60 * COS, (a2 - a1) * 60
-            den = vx * vx + vy * vy or 1e-9
-            t = np.clip((px * vx + py * vy) / den, 0, 1)
-            d = np.minimum(d, np.hypot(px - t * vx, py - t * vy))
-    return d
+            n = max(2, int(math.ceil(nm_between(a1, o1, a2, o2) / .2)) + 1)
+            pts.append(np.c_[np.linspace(a1, a2, n), np.linspace(o1, o2, n)])
+    return dist_to_points(np.vstack(pts)) if pts else np.full(GLAT.shape, 999.0)
 
 
 gauss = lambda d, s: np.exp(-(d / s) ** 2)
@@ -150,6 +147,23 @@ def read_depth():
     return depth[ii, jj], slope[ii, jj]
 
 
+# Regions for top spots and the track record: a square belongs to the region of its nearest bank
+REGIONS = ['South coast', 'East & north-east', 'North & west']
+BANK_REACH_NM = 35          # squares further than this from every bank are not scored
+BANKS = []
+
+
+def bank_region(b):
+    if b['lon'] >= -76.3: return 'East & north-east'
+    if b['lat'] < 17.98 and b['lon'] > -77.7: return 'South coast'
+    return 'North & west'
+
+
+def region_of(lat, lon):
+    if not BANKS: return REGIONS[0]
+    return bank_region(min(BANKS, key=lambda b: nm_between(lat, lon, b['lat'], b['lon'])))
+
+
 def parse_time(v):
     t = datetime.fromisoformat(str(v).replace('Z', '+00:00'))
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
@@ -200,6 +214,11 @@ def read_releases(logs):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     reasons, sources = {}, {}
+    global BANKS
+    try:
+        banks_raw = fetch(BASE + 'banks.json'); BANKS = [b for b in json.loads(banks_raw) if 'lat' in b and 'lon' in b]
+    except Exception as e:
+        log('banks unavailable:', e); banks_raw = None
     # chlorophyll front + zooplankton
     try:
         white, pink = read_map_layers(); sources['chlorophyll'] = 'traced from chlorophyll-latest.png'
@@ -244,16 +263,22 @@ def main():
     # no score on land or within 0.5 NM of it
     land = np.zeros(GLAT.shape, bool)
     coast = coast_geojson()
+    from matplotlib.path import Path as MPath
+    flat = np.c_[GLON.ravel(), GLAT.ravel()]
     for f in coast['features']:
         for ring in polygon_rings(f['geometry']):
-            land |= points_in_ring(GLON, GLAT, ring)
+            land |= MPath(np.asarray(ring)).contains_points(flat).reshape(GLAT.shape)
     if depth is not None: land |= depth < 3
     from scipy.ndimage import binary_dilation
     score[binary_dilation(land, iterations=1)] = 0
+    if BANKS:                                               # only the waters around the banks
+        score[dist_to_points([(b['lat'], b['lon']) for b in BANKS]) > BANK_REACH_NM] = 0
     score = score / max(score.max(), 1e-6)
 
     classes = [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')]
     feats = []
+    rows = []            # compact for the phone: [i, j, score×1000, depth m, drop×100, front NM×10, zoo NM×10, conv NM×10, release NM×10] (-1 = n/a)
+    q10 = lambda d: int(min(round(float(d) * 10), 9990))
     h = CELL / 2
     for i in range(GLAT.shape[0]):
         for j in range(GLAT.shape[1]):
@@ -268,20 +293,28 @@ def main():
             if pink is not None: why['zoo_nm'] = round(float(d_zoo[i, j]), 1)
             if conv: why['conv_nm'] = round(float(d_conv[i, j]), 1)
             if rel: why['release_nm'] = round(float(d_rel[i, j]), 1)
+            rows.append([int(i), int(j), int(round(v * 1000)), int(round(float(depth[i, j]))) if depth is not None else -1, int(round(float(s_drop[i, j]) * 100)),
+                         q10(d_front[i, j]) if white is not None else -1, q10(d_zoo[i, j]) if pink is not None else -1,
+                         q10(d_conv[i, j]) if conv else -1, q10(d_rel[i, j]) if rel else -1])
+            if v < .62: continue                     # the KML keeps Good and better only (file size)
             feats.append({'type': 'Feature', 'properties': dict(score=round(v, 3), cls=cls, lat=la, lon=lo, **why),
                           'geometry': {'type': 'Polygon', 'coordinates': [[[round(lo - h, 5), round(la - h, 5)], [round(lo + h, 5), round(la - h, 5)],
                                                                             [round(lo + h, 5), round(la + h, 5)], [round(lo - h, 5), round(la + h, 5)],
                                                                             [round(lo - h, 5), round(la - h, 5)]]]}})
-    # top spots, 2 NM apart
-    top = []
+    # top spots: the best 3 squares in each region, at least 3 NM apart
+    top, per = [], {}
     for k in np.argsort(-score, axis=None):
         i, j = np.unravel_index(k, score.shape)
         la, lo = float(GLAT[i, j]), float(GLON[i, j])
         if score[i, j] < .5: break
         if i < 2 or j < 2 or i >= score.shape[0] - 2 or j >= score.shape[1] - 2: continue   # skip the area's edges
-        if all(nm_between(la, lo, t['lat'], t['lon']) > 2.0 for t in top):
-            top.append(dict(rank=len(top) + 1, lat=la, lon=lo, score=round(float(score[i, j]), 3)))
-        if len(top) == 5: break
+        reg = region_of(la, lo)
+        if per.get(reg, 0) >= 3: continue
+        if all(nm_between(la, lo, t['lat'], t['lon']) > 3.0 for t in top):
+            per[reg] = per.get(reg, 0) + 1
+            top.append(dict(rank=per[reg], region=reg, lat=la, lon=lo, score=round(float(score[i, j]), 3)))
+        if len(per) == len(REGIONS) and all(v >= 3 for v in per.values()): break
+    top.sort(key=lambda t: (REGIONS.index(t['region']), t['rank']))
 
     built = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     chl_meta = {}
@@ -291,18 +324,18 @@ def main():
                 sources=sources, chlorophyll_date=chl_meta.get('observation_date'), zooplankton_date=chl_meta.get('zooplankton_date'),
                 currents_valid_utc=feat_props.get('currents_valid_utc'), releases_used=len(rel), source_site=BASE,
                 note='Relative ranking of conditions. Not a probability, not a fish forecast, not for navigation.')
-    (OUT / 'grid.geojson').write_text(json.dumps({'type': 'FeatureCollection', 'features': feats}, separators=(',', ':')))
+    (OUT / 'grid.json').write_text(json.dumps(dict(area=AREA, cell=CELL, fields=['i', 'j', 'score', 'depth_m', 'drop', 'front_nm', 'zoo_nm', 'conv_nm', 'release_nm'],
+                                                   rows=rows), separators=(',', ':')))
     (OUT / 'top-spots.json').write_text(json.dumps(top, indent=1))
     # public page: date, species and position only (notes stay in the private sheet)
     (OUT / 'releases.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
                                                     'note': f"{r['species']} × {r['count']}"} for r in rel], indent=1))
     (OUT / 'meta.json').write_text(json.dumps(meta, indent=1))
     (OUT / 'coast.geojson').write_text(json.dumps(coast, separators=(',', ':')))
-    try: (OUT / 'banks.json').write_bytes(fetch(BASE + 'banks.json'))
-    except Exception: pass
+    if banks_raw: (OUT / 'banks.json').write_bytes(banks_raw)
     write_kml(feats, top, rel, meta); write_gpx(top, rel)
     # this build's grid, kept for the track record (scores ×1000 for every shaded square)
-    ocean = int(np.count_nonzero(~binary_dilation(land, iterations=1)))
+    ocean = int(np.count_nonzero(score > 0))
     shaded = [[int(i), int(j), int(round(float(score[i, j]) * 1000))] for i, j in zip(*np.nonzero(score >= .32))]
     (OUT / 'snapshot.json').write_text(json.dumps(dict(built_utc=built, area=AREA, cell=CELL, ocean_cells=ocean, cells=shaded), separators=(',', ':')))
     track_record(logs)
@@ -324,7 +357,7 @@ def track_record(logs):
     entries, cover_hi, cover_good = [], [], []
     for r in sorted(logs, key=lambda x: x['when']):
         before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
-        e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r))
+        e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']))
         if not before:
             e['scored'] = False; entries.append(e); continue
         s = before[-1]; A = s['area']
@@ -344,7 +377,9 @@ def track_record(logs):
                quiet=dict(scored=len(qu), below_good=sum(e['score'] < .62 for e in qu)),
                area_share=dict(high_plus=round(sum(cover_hi) / len(cover_hi), 3) if cover_hi else None,
                                good_plus=round(sum(cover_good) / len(cover_good), 3) if cover_good else None),
-               not_scored=len(entries) - len(sc), entries=entries[-50:])
+               not_scored=len(entries) - len(sc), entries=entries[-50:],
+               by_region={reg: dict(scored=sum(1 for e in st if e['region'] == reg), high_plus=sum(1 for e in st if e['region'] == reg and e['score'] >= .77))
+                          for reg in REGIONS})
     (OUT / 'track-record.json').write_text(json.dumps(out, indent=1))
     log('track record:', {k: out[k] for k in ('snapshots', 'strikes', 'quiet', 'area_share', 'not_scored')})
 
@@ -411,7 +446,7 @@ def write_kml(feats, top, rel, meta):
                    f'<Polygon><outerBoundaryIs><LinearRing><coordinates>{ring}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>')
     out.append('</Folder><Folder><name>Top spots</name>')
     for t in top:
-        out.append(f'<Placemark><name>Top {t["rank"]}: {ddm(t["lat"], "N", "S")} {ddm(t["lon"], "E", "W")}</name><styleUrl>#top</styleUrl>'
+        out.append(f'<Placemark><name>{t["region"]} top {t["rank"]}: {ddm(t["lat"], "N", "S")} {ddm(t["lon"], "E", "W")}</name><styleUrl>#top</styleUrl>'
                    f'<Point><coordinates>{t["lon"]},{t["lat"]},0</coordinates></Point></Placemark>')
     out.append('</Folder><Folder><name>Past releases</name>')
     for r in rel:
@@ -422,7 +457,7 @@ def write_kml(feats, top, rel, meta):
 
 def write_gpx(top, rel):
     out = ['<?xml version="1.0" encoding="UTF-8"?>', '<gpx version="1.1" creator="Sea Intel Lab" xmlns="http://www.topografix.com/GPX/1/1">']
-    for t in top: out.append(f'<wpt lat="{t["lat"]:.4f}" lon="{t["lon"]:.4f}"><name>TOP {t["rank"]}</name></wpt>')
+    for t in top: out.append(f'<wpt lat="{t["lat"]:.4f}" lon="{t["lon"]:.4f}"><name>{''.join(w[0] for w in t["region"].replace('&', '').split()).upper()} TOP {t["rank"]}</name></wpt>')
     for r in rel: out.append(f'<wpt lat="{r["lat"]:.4f}" lon="{r["lon"]:.4f}"><name>REL {r["date"][5:10]}</name></wpt>')
     out.append('</gpx>')
     (OUT / 'top-spots.gpx').write_text('\n'.join(out))
