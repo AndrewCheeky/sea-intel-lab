@@ -11,7 +11,7 @@ async def main():
         pg = await ctx.new_page(); errs = []
         from datetime import datetime, timezone
         t = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
-        await ctx.add_init_script("if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', 1); localStorage.setItem('sil.logs', JSON.stringify([{id: 'smoke-1', time: '%s', lat: 17.70, lon: -76.90, species: 'Birds working', count: 1, note: '[seen] Birds working', exact: false, synced: false}])); }" % t)
+        await ctx.add_init_script("if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', 1); localStorage.setItem('sil.logs', JSON.stringify([{id: 'smoke-1', time: '%s', lat: 17.70, lon: -76.90, species: 'Birds working', count: 1, note: '[seen] Birds working', exact: false, synced: false}, {id: 'smoke-2', time: '%s', lat: 17.60, lon: -76.80, species: 'Blue marlin', count: 1, note: '[Strike, Released] ', exact: false, synced: false}])); }" % (t, t))
         pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
         pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
         pg.on('pageerror', lambda e: errs.append(str(e)))
@@ -44,7 +44,14 @@ async def main():
             await seen.click(); await pg.wait_for_timeout(400)
             btn = await pg.query_selector('.leaflet-popup .delLog')
             if btn: await btn.click(); await pg.wait_for_timeout(600)
-            deleted = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 0 && !document.querySelector('.seen')")
+            bird_gone = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 1 && !document.querySelector('.seen')")
+            green = await pg.query_selector('path[fill="#2ee66b"]')
+            if bird_gone and green:
+                await green.click(); await pg.wait_for_timeout(400)
+                print('strike popup:', (await pg.inner_text('.leaflet-popup-content'))[:80].replace(chr(10), ' / '))
+                btn = await pg.query_selector('.leaflet-popup .delLog')
+                if btn: await btn.click(); await pg.wait_for_timeout(600)
+            deleted = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 0 && !document.querySelector('path[fill=\\"#2ee66b\\"]')")
         print('delete a log:', deleted)
         await pg.click('#moreBtn')
         await pg.click('#boatBtn'); await pg.wait_for_timeout(1500)

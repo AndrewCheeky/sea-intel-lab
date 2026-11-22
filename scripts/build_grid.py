@@ -11,7 +11,7 @@ releases, and writes a relative score for every ~0.6 NM square south of Kingston
 
 The score is a RELATIVE ranking of conditions, not a probability and not a fish forecast.
 """
-import io, json, math, os, sys, time, urllib.request, urllib.parse, csv
+import io, json, math, os, re, sys, time, urllib.request, urllib.parse, csv
 from datetime import datetime, timezone
 from pathlib import Path
 import numpy as np
@@ -254,6 +254,12 @@ def read_logs():
     return out
 
 
+def outcome_of(r):
+    """'Strike, Landed' etc. from the note prefix the live map adds."""
+    m = re.match(r'^\[([A-Za-z ,]+)\]', str(r.get('note') or ''))
+    return m.group(1) if m and m.group(1) != 'seen' else ''
+
+
 def is_sighting(r): return r['species'] in SIGHTINGS
 
 
@@ -484,7 +490,7 @@ def main():
     (OUT / 'top-spots.json').write_text(json.dumps(top, indent=1))
     # public page: date, species and position only (notes stay in the private sheet)
     (OUT / 'releases.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
-                                                    'note': f"{r['species']} × {r['count']}"} for r in rel], indent=1))
+                                                    'note': f"{r['species']}{' × ' + str(r['count']) if r['count'] > 1 else ''}" + (f" · {outcome_of(r)}" if outcome_of(r) else '')} for r in rel], indent=1))
     (OUT / 'meta.json').write_text(json.dumps(meta, indent=1))
     (OUT / 'coast.geojson').write_text(json.dumps(coast, separators=(',', ':')))
     if banks_raw: (OUT / 'banks.json').write_bytes(banks_raw)
