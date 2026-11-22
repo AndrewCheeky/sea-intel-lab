@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=17">
+<link rel="stylesheet" href="app.css?v=18">
 </head>
 <body>
 <header class="top">
@@ -59,7 +59,8 @@
   <label class="row"><input type="checkbox" id="tiles"> Detailed background map <small>needs signal</small></label>
   <div class="grp">Logs</div>
   <button class="row" id="trackBtn">Track record <small id="trackShort">–</small></button>
-  <button class="row" id="codeBtn">Logging code <small id="codeState">not set</small></button>
+  <button class="row" id="codeBtn">Boat code <small id="codeState">not set</small></button>
+  <button class="row" id="shareBtn">Sharing <small id="shareState">not chosen</small></button>
   <button class="row" id="sendLogs">Share my logs as text <small id="logCount">none yet</small></button>
 </div>
 
@@ -90,7 +91,7 @@
   <p>Red dots are the banks: tap one for wind, sea and current. Numbered circles are the best spots in each area. Stars are strikes: green today, blue earlier. Tap a square to see what it has going for it.</p>
   <p id="sources" class="small"></p>
   <p class="small">Experimental. Positions are approximate, so always navigate with your chart and chartplotter.
-  Your boat position stays on your phone. Only the strikes and sightings you log are sent, to your own private sheet, and only after you enter a logging code.</p>
+  Your boat position stays on your phone. Strikes and sightings you log are sent with your boat code. Your exact positions stay private and help make the map more accurate. Other anglers only see what your boat chooses to share (More → Sharing).</p>
 </div>
 
 <dialog id="seenDlg">
@@ -103,6 +104,19 @@
       <button value="Weedline">Weedline</button><button value="Debris / log">Debris / log</button>
     </div>
     <div class="dlgBtns"><button value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
+<dialog id="shareDlg">
+  <form method="dialog">
+    <h2>Share your catches? <small id="shareBoat"></small></h2>
+    <p class="small">Your exact positions are always kept private and used only to make the map more accurate. Choose what other anglers can see. You can change this any time, for example turn it off for a tournament and share afterwards. It applies to every phone using your boat code and to all your boat's logs.</p>
+    <div class="shareOpts">
+      <button value="research"><b>Research only</b><small>Nobody else sees your catches</small></button>
+      <button value="bank"><b>General area</b><small>Others see the fish and the nearest bank, not the spot</small></button>
+      <button value="all"><b>Everything</b><small>Others see the exact spot</small></button>
+    </div>
+    <div class="dlgBtns"><button value="cancel" formnovalidate>Not now</button></div>
   </form>
 </dialog>
 
@@ -126,6 +140,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=25"></script>
+<script src="app.js?v=26"></script>
 </body>
 </html>

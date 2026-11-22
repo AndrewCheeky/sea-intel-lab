@@ -230,12 +230,12 @@ def parse_time(v):
 def read_logs():
     """All logs: data/releases.json plus the live map's logs from the Apps Script sheet (if configured)."""
     f = DATA / 'releases.json'
-    logs = [dict(r, source='file') for r in (json.loads(f.read_text()) if f.exists() else [])]
+    logs = [dict(r, source='file', share='all') for r in (json.loads(f.read_text()) if f.exists() else [])]
     url, key = os.getenv('STRIKELOG_URL', '').strip(), os.getenv('STRIKELOG_KEY', '').strip()
     if url and key:
         try:
             j = json.loads(fetch(url + ('&' if '?' in url else '?') + urllib.parse.urlencode({'action': 'strikelogs', 'key': key})))
-            if j.get('ok'): logs += [dict(r, source='app') for r in j.get('logs', [])]
+            if j.get('ok'): logs += [dict(r, source='app', share=r.get('share') or 'research') for r in j.get('logs', [])]
             else: log('strike logs refused:', j.get('error'))
         except Exception as e:
             log('strike logs unavailable:', e)
@@ -247,7 +247,7 @@ def read_logs():
             note = str(r.get('note') or '')
             if note.startswith('[seen] ') and note[7:] in SIGHTINGS: r['species'] = note[7:]   # sightings sent to an older sheet script
         except Exception as e:
-            log('skipping log', r, e); continue
+            log('skipping a log:', type(e).__name__); continue        # never print positions (build logs are public)
         k = (r['when'].strftime('%Y%m%d%H%M'), round(r['lat'], 3), round(r['lon'], 3))
         if k in seen: continue
         seen.add(k); out.append(r)
@@ -261,6 +261,16 @@ def outcome_of(r):
 
 
 def is_sighting(r): return r['species'] in SIGHTINGS
+
+
+# What a boat lets other anglers see (chosen in the app, per boat code). Exact positions always count privately
+# towards the track record; only 'all' logs shape the public map or appear at their real position.
+def shared_exact(r): return r.get('share') == 'all'
+def shared_bank(r): return r.get('share') == 'bank'
+
+
+def nearest_bank(r):
+    return min(BANKS, key=lambda b: nm_between(r['lat'], r['lon'], b['lat'], b['lon'])) if BANKS else None
 
 
 def is_strike(r): return r['count'] > 0 and r['species'] != 'No strikes here' and not is_sighting(r)
@@ -325,13 +335,13 @@ def contours_geojson(depth=None):
 def read_releases(logs):
     now = datetime.now(timezone.utc)
     out = []
-    for r in [x for x in logs if is_strike(x)]:
+    for r in [x for x in logs if is_strike(x) and shared_exact(x)]:
         try:
             age = (now - r['when']).days
             if age > 60: continue
             out.append(dict(r, weight=0.5 ** (age / 14)))          # half the weight every 14 days
         except Exception as e:
-            log('skipping release', r, e)
+            log('skipping a release:', type(e).__name__)
     return out
 
 
@@ -394,7 +404,7 @@ def main():
 
     # birds / bait / weed seen in the last 18 hours: a short-lived lift around each sighting
     now = datetime.now(timezone.utc)
-    sightings = [r for r in logs if is_sighting(r) and 0 <= (now - r['when']).total_seconds() < 18 * 3600]
+    sightings = [r for r in logs if is_sighting(r) and shared_exact(r) and 0 <= (now - r['when']).total_seconds() < 18 * 3600]
     s_sight = np.zeros(GLAT.shape); d_sight = np.full(GLAT.shape, 999.0)
     for r in sightings:
         d = nm_between(GLAT, GLON, r['lat'], r['lon']); d_sight = np.minimum(d_sight, d)
@@ -489,8 +499,19 @@ def main():
     (OUT / 'grid.json').write_text(json.dumps(dict(area=AREA, cell=CELL, rows=rows), separators=(',', ':')))
     (OUT / 'top-spots.json').write_text(json.dumps(top, indent=1))
     # public page: date, species and position only (notes stay in the private sheet)
-    (OUT / 'releases.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
-                                                    'note': f"{r['species']}{' × ' + str(r['count']) if r['count'] > 1 else ''}" + (f" · {outcome_of(r)}" if outcome_of(r) else '')} for r in rel], indent=1))
+    def public_pos(r):
+        if shared_exact(r): return round(r['lat'], 4), round(r['lon'], 4), None
+        b = nearest_bank(r); return (round(b['lat'], 4), round(b['lon'], 4), b['name']) if b else (None, None, None)
+    pub_rel = []
+    for r in sorted((x for x in logs if is_strike(x) and (shared_exact(x) or shared_bank(x)) and (now - x['when']).days <= 60), key=lambda x: x['when']):
+        la, lo, bank = public_pos(r)
+        if la is None: continue
+        e = {'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': la, 'lon': lo,
+             'note': f"{r['species']}{' × ' + str(r['count']) if r['count'] > 1 else ''}" + (f" · {outcome_of(r)}" if outcome_of(r) else '')}
+        if bank: e['bank'] = bank
+        if r.get('id'): e['id'] = r['id']
+        pub_rel.append(e)
+    (OUT / 'releases.json').write_text(json.dumps(pub_rel, indent=1))
     (OUT / 'meta.json').write_text(json.dumps(meta, indent=1))
     (OUT / 'coast.geojson').write_text(json.dumps(coast, separators=(',', ':')))
     if banks_raw: (OUT / 'banks.json').write_bytes(banks_raw)
@@ -499,8 +520,16 @@ def main():
     except Exception as e:
         log('depth lines for the map unavailable:', e)
     write_kml(feats, top, rel, meta); write_gpx(top, rel)
-    (OUT / 'sightings.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
-                                                      'what': r['species']} for r in logs if is_sighting(r) and (now - r['when']).total_seconds() < 48 * 3600], indent=1))
+    pub_seen = []
+    for r in logs:
+        if not (is_sighting(r) and (shared_exact(r) or shared_bank(r)) and (now - r['when']).total_seconds() < 48 * 3600): continue
+        la, lo, bank = public_pos(r)
+        if la is None: continue
+        e = {'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': la, 'lon': lo, 'what': r['species']}
+        if bank: e['bank'] = bank
+        if r.get('id'): e['id'] = r['id']
+        pub_seen.append(e)
+    (OUT / 'sightings.json').write_text(json.dumps(pub_seen, indent=1))
     try:
         (OUT / 'times.json').write_text(json.dumps(build_times(), separators=(',', ':')))
     except Exception as e:
@@ -682,7 +711,8 @@ def track_record(logs):
     entries, cover_hi, cover_good, alt_cover = [], [], [], []
     for r in sorted((x for x in logs if not is_sighting(x)), key=lambda x: x['when']):   # sightings aren't strikes or quiet spots
         before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
-        e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']))
+        e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']),
+                 public=shared_exact(r) or shared_bank(r))
         if not before:
             e['scored'] = False; entries.append(e); continue
         s = before[-1]; A = s['area']
@@ -706,12 +736,13 @@ def track_record(logs):
                quiet=dict(scored=len(qu), below_good=sum(e['score'] < .62 for e in qu)),
                area_share=dict(high_plus=round(sum(cover_hi) / len(cover_hi), 3) if cover_hi else None,
                                good_plus=round(sum(cover_good) / len(cover_good), 3) if cover_good else None),
-               not_scored=len(entries) - len(sc), entries=entries[-50:],
+               not_scored=len(entries) - len(sc), private_logs=sum(1 for e in entries if not e['public']),
+               entries=[{k: v for k, v in e.items() if k != 'public'} for e in entries if e['public']][-50:],   # private logs count but aren't listed
                comparison=compare(sc, alt_cover),
                by_region={reg: dict(scored=sum(1 for e in st if e['region'] == reg), high_plus=sum(1 for e in st if e['region'] == reg and e['score'] >= .77))
                           for reg in REGIONS})
     (OUT / 'track-record.json').write_text(json.dumps(out, indent=1))
-    log('track record:', {k: out[k] for k in ('snapshots', 'strikes', 'quiet', 'area_share', 'not_scored')})
+    log('track record:', {k: out[k] for k in ('snapshots', 'strikes', 'quiet', 'area_share', 'not_scored', 'private_logs')})
 
 
 def compare(scored, alt_cover):
