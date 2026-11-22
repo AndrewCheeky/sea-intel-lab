@@ -28,7 +28,15 @@ jobs:
           SOURCE_SITE: ${{ vars.SOURCE_SITE || 'https://andrewcheeky.github.io/jamaica-marine-currents/' }}
         run: python scripts/build_grid.py
       - name: Add the live map
-        run: cp web/* site/
+        run: |
+          cp web/* site/
+          mkdir -p site/vendor/leaflet tmp-leaflet
+          (cd tmp-leaflet && npm pack leaflet@1.9.4 --silent && tar xzf leaflet-1.9.4.tgz)
+          cp -r tmp-leaflet/package/dist/leaflet.js tmp-leaflet/package/dist/leaflet.css tmp-leaflet/package/dist/images site/vendor/leaflet/
+      - name: Smoke test (page loads, no errors)
+        run: |
+          pip install playwright >/dev/null && python -m playwright install --with-deps chromium >/dev/null
+          python scripts/smoke_test.py site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
