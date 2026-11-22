@@ -45,10 +45,10 @@
     const canvas = L.canvas({padding: .3});
     const n = v => v < 0 ? null : v / 10;
     for (const r of grid.rows) {
-      const [i, j, s1000, depth, drop, front, zoo, conv, rel, temp = -1, cool = 0] = r, score = s1000 / 1000;
+      const [i, j, s1000, depth, drop, front, zoo, conv, rel, temp = -1, cool = 0, sight = -1] = r, score = s1000 / 1000;
       const la = area.south + (i + .5) * cellDeg, lo = area.west + (j + .5) * cellDeg;
       const p = {score, cls: CLASSES.find(c => score >= c[0])[1], lat: la, lon: lo, depth_m: depth < 0 ? null : depth, drop: drop / 100,
-                 front_nm: n(front), zoo_nm: n(zoo), conv_nm: n(conv), release_nm: n(rel), temp_nm: n(temp), cool: cool / 100};
+                 front_nm: n(front), zoo_nm: n(zoo), conv_nm: n(conv), release_nm: n(rel), temp_nm: n(temp), cool: cool / 100, sight_nm: n(sight)};
       cells.set(`${i}|${j}`, p); if (score >= .77) hot.push(p);
       L.rectangle([[la - cellDeg / 2, lo - cellDeg / 2], [la + cellDeg / 2, lo + cellDeg / 2]],
         {renderer: canvas, stroke: false, fillColor: COLORS[p.cls], fillOpacity: OPAC[p.cls]}).on('click', ev => L.popup().setLatLng(ev.latlng).setContent(explain(p)).openOn(map)).addTo(sea);
@@ -71,6 +71,7 @@
     if (near(p.zoo_nm, 2.5)) r.push('Bait likely nearby');
     if (near(p.conv_nm, 3)) r.push('Current line nearby');
     if (near(p.release_nm, 3)) r.push('Recent catch nearby');
+    if (near(p.sight_nm, 2)) r.push('Birds or bait seen nearby recently');
     if (!r.length) r.push('Not much going for it today');
     return `<b>${p.cls}</b><br>${pos2txt(p.lat, p.lon)}<br><small>${r.join('<br>')}</small>`;
   }
@@ -88,6 +89,7 @@
     if (!boat) { boat = L.marker(here, {icon: boatIcon(heading), zIndexOffset: 1000, keyboard: false}).addTo(map); acc = L.circle(here, {radius: p.coords.accuracy, weight: 1, color: '#1a73e8', fillOpacity: .08, interactive: false}).addTo(map); map.setView(here, Math.max(map.getZoom(), 12)); }
     else { boat.setLatLng(here).setIcon(boatIcon(heading)); acc.setLatLng(here).setRadius(p.coords.accuracy); }
     if (follow) map.panTo(here, {animate: true});
+    if (!onPos.timesDone) { onPos.timesDone = true; renderTimes(); }
     $('boatBar').hidden = false;
     $('pos').textContent = pos2txt(la, lo);
     const c = area && cells.get(key(la, lo));
@@ -123,6 +125,7 @@
   let pendingPos = null;
   $('logBtn').addEventListener('click', () => {
     pendingPos = last;
+    $('species').value = 'Blue marlin'; $('count').value = 1;
     $('logWhere').textContent = last ? `At ${pos2txt(last[0], last[1])} (your boat).` : 'No boat position yet – it will use the centre of the map. Tap “Show my boat” first for an exact spot.';
     if (!last) { const c = map.getCenter(); pendingPos = [c.lat, c.lng]; }
     $('logDlg').showModal();
@@ -191,7 +194,77 @@
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
   });
 
-  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
+  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); renderTimes(); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
+
+  // ---------- birds / bait / weed sightings (logged like releases, short-lived on the map)
+  const sightLayer = L.layerGroup().addTo(map);
+  async function drawSightings() {
+    sightLayer.clearLayers();
+    let list = []; try { list = await getJSON('sightings.json'); } catch {}
+    const mine = store.get(LOGS, []).filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species}));
+    const seen = new Set();
+    for (const s of [...mine, ...list]) {
+      const age = (Date.now() - new Date(s.date)) / 36e5, k = `${s.date.slice(0, 16)}|${s.lat.toFixed(3)}`;
+      if (age > 24 || age < -1 || seen.has(k)) continue; seen.add(k);
+      L.marker([s.lat, s.lon], {zIndexOffset: 600, icon: L.divIcon({className: 'seen', iconSize: [24, 24], iconAnchor: [12, 12],
+        html: `<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="opacity:${Math.max(.35, 1 - age / 24)}"><circle cx="12" cy="12" r="10" fill="#7CFC9A" stroke="#061b33" stroke-width="2"/><path d="M6 13c2-2 4-2 6 0 2-2 4-2 6 0" fill="none" stroke="#061b33" stroke-width="2" stroke-linecap="round"/></svg>`})})
+        .bindPopup(`<b>${esc(s.what)}</b><br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${pos2txt(s.lat, s.lon)}`).addTo(sightLayer);
+    }
+  }
+  const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];
+  let seenPos = null;
+  $('seenBtn').addEventListener('click', () => {
+    seenPos = last; if (!last) { const c = map.getCenter(); seenPos = [c.lat, c.lng]; }
+    $('seenWhere').textContent = last ? `At ${pos2txt(last[0], last[1])} (your boat).` : 'No boat position yet – it will use the centre of the map.';
+    $('seenDlg').showModal();
+  });
+  $('seenDlg').addEventListener('close', () => {
+    const v = $('seenDlg').returnValue; if (!SIGHT.includes(v) || !seenPos) return;
+    const logs = store.get(LOGS, []);
+    logs.push({id: newId(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '', exact: !!last, synced: false});
+    store.set(LOGS, logs); drawMyLogs(); drawSightings(); toast(`${v} logged`); sendPending();
+  });
+
+  // ---------- best times strip: dawn/dusk (phone), tide and current turns (from the build), moon (phone, for information)
+  const POINTS = {south: [17.70, -76.88], east: [17.85, -76.15], north: [18.55, -77.60], all: [17.70, -76.88]};
+  let timesData = null, tomorrow = false;
+  const hm = d => d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  function nearestPoint() {
+    if (last) { let best = 'south', bd = 1e9; for (const k of ['south', 'east', 'north']) { const d = nm(last, POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
+    const v = store.get('sil.view', 'south'); return v === 'all' ? 'south' : v;
+  }
+  function renderTimes() {
+    const now = new Date(), day = new Date(now); day.setHours(0, 0, 0, 0); if (tomorrow) day.setDate(day.getDate() + 1);
+    const end = new Date(day.getTime() + 864e5), mid = new Date(day.getTime() + 432e5);
+    const pk = nearestPoint(), [la, lo] = last || POINTS[pk];
+    const sun = Sky.sunTimes(mid, la, lo);
+    const win = [
+      {start: sun.dawn, end: new Date(sun.sunrise.getTime() + 36e5), label: `Dawn ${hm(sun.dawn)}–${hm(new Date(sun.sunrise.getTime() + 36e5))}`, why: 'First light to an hour after sunrise: fish often feed near the surface.'},
+      {start: new Date(sun.sunset.getTime() - 36e5), end: sun.dusk, label: `Dusk ${hm(new Date(sun.sunset.getTime() - 36e5))}–${hm(sun.dusk)}`, why: 'The last hour of sun to last light: another strong feeding time.'}];
+    const items = win.map(w => ({...w, kind: 'light'}));
+    const P = timesData && timesData.points && timesData.points[pk];
+    if (P) {
+      for (const t of P.tides) { const d = new Date(t.time); if (d >= day && d < end) items.push({start: new Date(d - 27e5), end: new Date(+d + 27e5), at: d, kind: 'tide', label: `Tide ${t.type} ${hm(d)}`, why: `The tide turns (${t.type}). Bait often moves when water starts to move again.`}); }
+      for (const t of P.current) { const d = new Date(t.time); if (d >= day && d < end) items.push({start: new Date(d - 27e5), end: new Date(+d + 27e5), at: d, kind: 'current', label: `Current ${t.type === 'slack' ? 'slack' : 'turns'} ${hm(d)}`, why: 'The current eases or changes direction. Strikes often come as it picks up again.'}); }
+    }
+    for (const it of items) if (it.kind !== 'light') it.prime = win.some(w => it.at >= w.start && it.at <= w.end);
+    const md = Sky.moonDay(day, la, lo), il = Sky.moonIllum(mid);
+    const info = [];
+    if (md.overhead && md.overhead >= day && md.overhead < end) info.push({at: md.overhead, label: `Moon overhead ${hm(md.overhead)}`});
+    if (md.underfoot && md.underfoot >= day && md.underfoot < end) info.push({at: md.underfoot, label: `Moon underfoot ${hm(md.underfoot)}`});
+    items.sort((a, b) => a.start - b.start);
+    $('chips').innerHTML = items.map((it, k) => {
+      const cls = ['chip', it.prime ? 'prime' : '', now >= it.start && now <= it.end ? 'now' : '', it.end < now ? 'past' : ''].join(' ');
+      return `<button class="${cls}" data-k="${k}" title="${esc(it.why)}">${it.prime ? 'Prime · ' : ''}${esc(it.label)}</button>`;
+    }).join('') + info.map(i => `<span class="chip info" title="Moon times, for information">${esc(i.label)}</span>`).join('');
+    $('chips').querySelectorAll('button.chip').forEach(b => b.addEventListener('click', () => toast(items[+b.dataset.k].why)));
+    const range = P && P.tide_range_m != null ? (P.tide_range_m < .5 ? ' · Tides are small here, so dawn and dusk matter most' : '') : (timesData ? '' : ' · Tide and current times load with signal');
+    $('moonLine').textContent = `${Sky.phaseName(il.phase)}, ${Math.round(il.fraction * 100)}% lit · ${{south: 'South coast', east: 'East', north: 'North coast'}[pk]}${range}`;
+  }
+  function setDay(t) { tomorrow = t; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
+  $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
+  getJSON('times.json').then(t => { timesData = t; renderTimes(); }).catch(() => renderTimes());
+  setInterval(renderTimes, 300000);
 
   // ---------- depth contours (on/off, remembered)
   const DEPTH_COLORS = {100: '#9fe7ff', 200: '#e0f7ff', 500: '#5cc8ff', 1000: '#3a8fe0', 2000: '#8a7dff'};
@@ -248,7 +321,7 @@
   });
   if (store.get('sil.tiles', false)) { $('tiles').checked = true; $('tiles').dispatchEvent(new Event('change')); }
 
-  loadTrack(); setTimeout(sendPending, 1500);
+  loadTrack(); setTimeout(sendPending, 1500); drawSightings();
   load().catch(e => { $('built').textContent = 'Could not load the grid. ' + (navigator.onLine ? 'Try again shortly.' : 'Open it once with signal.'); console.error(e); });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
