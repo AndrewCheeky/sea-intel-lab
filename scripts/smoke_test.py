@@ -20,6 +20,9 @@ async def main():
         print(f'depth labels shown: {labels}')
         print('times strip:', await pg.inner_text('#chips'))
         print('plan:', await pg.inner_text('#plan'))
+        if await pg.query_selector('#planConf'):
+            await pg.click('#planConf'); await pg.wait_for_timeout(300)
+            print('picture sheet open:', not await pg.evaluate("document.getElementById('confSheet').hidden"))
         await pg.evaluate("document.querySelectorAll('.sheet').forEach(s => s.hidden = true)")
         pins = await pg.query_selector_all('.leaflet-pins-pane path')
         bank_popup = ''

@@ -396,11 +396,8 @@
     if (last && cond) { const c = nearestCond(last[0], last[1]); reg = c ? (c.kind === 'spot' ? c.name.replace(/ spot \d+$/, '') : null) : null; }
     if (!reg || !confData[reg]) reg = VIEW_REGION[store.get('sil.view', 'south')] || 'South coast';
     const c = confData[reg]; if (!c) return;
-    $('confBtn').hidden = false; $('confBtn').className = 'conf ' + c.level; $('confBtn').textContent = `Picture: ${c.level}`;
-    $('confBtn').title = `${reg}: ${c.why.join('. ')}`;
     $('confList').innerHTML = Object.entries(confData).map(([r, v]) => `<div class="confRow"><b>${esc(r)}</b><span class="conf ${v.level}">${v.level}</span><ul>${v.why.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`).join('');
   }
-  $('confBtn').addEventListener('click', () => sheet($('confBtn'), $('confSheet')));
   getJSON('conditions.json').then(c => { cond = c; if (map.hasLayer(arrowLayer)) drawArrows(); renderConf(); renderPlan(); }).catch(() => {});
   getJSON('weed.json').then(w => { weedData = w; drawWeed(w); $('weedDate').textContent = `${w.patches.length} patches · 3 days to ${w.date}`; }).catch(() => { $('weedDate').textContent = 'not available yet'; });
   getJSON('confidence.json').then(c => { confData = c; renderConf(); renderPlan(); }).catch(() => {});
@@ -449,8 +446,8 @@
     const c = confData && confData[spot.region];
     const el = $('plan'); el.hidden = false;
     el.innerHTML = `<span class="k">Today's plan</span><b>${esc(spot.region)} spot ${spot.rank}</b>, ${esc(where)} · <b>${esc(when)}</b>` +
-      (seaTxt ? ` · ${esc(seaTxt)}` : '') + (c ? ` · <span class="conf ${c.level}">Picture: ${c.level}</span>` : '');
-    el.onclick = () => { map.setView([spot.lat, spot.lon], Math.max(map.getZoom(), 12)); const m = topMarkers[`${spot.region}|${spot.rank}`]; if (m) m.openPopup(); };
+      (seaTxt ? ` · ${esc(seaTxt)}` : '') + (c ? ` · <span class="conf ${c.level}" id="planConf" role="button" title="Why">Picture: ${c.level} ⓘ</span>` : '');
+    el.onclick = ev => { if (ev.target.closest('#planConf')) { sheet(el, $('confSheet')); return; } map.setView([spot.lat, spot.lon], Math.max(map.getZoom(), 12)); const m = topMarkers[`${spot.region}|${spot.rank}`]; if (m) m.openPopup(); };
   }
   setInterval(renderPlan, 300000);
 
