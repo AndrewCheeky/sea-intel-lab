@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install numpy scipy pillow
+      - name: Reuse depth data
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: etopo-v1
       - name: Build grid
         env:
           SOURCE_SITE: ${{ vars.SOURCE_SITE || 'https://andrewcheeky.github.io/jamaica-marine-currents/' }}
