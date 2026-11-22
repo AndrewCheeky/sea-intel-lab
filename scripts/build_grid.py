@@ -380,6 +380,9 @@ def main():
             and not (k == 'conv' and not conv) and not (k == 'release' and not rel) and not (k == 'temp' and not breaks)}
     tot = sum(used.values())
     score = sum(used[k] / tot * s[k] for k in used)
+    # Side-by-side comparison: the same score WITHOUT sea temperature, kept only for the track record
+    used_alt = {k: v for k, v in used.items() if k != 'temp'}
+    alt = sum(used_alt[k] / sum(used_alt.values()) * s[k] for k in used_alt)
     if breaks:                                              # break lining up with the drop-off or the colour change
         score = score + ALIGN_BONUS * s['temp'] * np.maximum(s['drop'], s['front'])
     cool = np.zeros(GLAT.shape)
@@ -399,10 +402,11 @@ def main():
             land |= MPath(np.asarray(ring)).contains_points(flat).reshape(GLAT.shape)
     if depth is not None: land |= depth < 3
     from scipy.ndimage import binary_dilation
-    score[binary_dilation(land, iterations=1)] = 0
+    mask = binary_dilation(land, iterations=1)
     if BANKS:                                               # only the waters around the banks
-        score[dist_to_points([(b['lat'], b['lon']) for b in BANKS]) > BANK_REACH_NM] = 0
-    score = score / max(score.max(), 1e-6)
+        mask |= dist_to_points([(b['lat'], b['lon']) for b in BANKS]) > BANK_REACH_NM
+    score[mask] = 0; alt[mask] = 0
+    score = score / max(score.max(), 1e-6); alt = alt / max(alt.max(), 1e-6)
 
     classes = [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')]
     feats = []
@@ -470,7 +474,9 @@ def main():
     # this build's grid, kept for the track record (scores ×1000 for every shaded square)
     ocean = int(np.count_nonzero(score > 0))
     shaded = [[int(i), int(j), int(round(float(score[i, j]) * 1000))] for i, j in zip(*np.nonzero(score >= .32))]
-    (OUT / 'snapshot.json').write_text(json.dumps(dict(built_utc=built, area=AREA, cell=CELL, ocean_cells=ocean, cells=shaded), separators=(',', ':')))
+    shaded_alt = [[int(i), int(j), int(round(float(alt[i, j]) * 1000))] for i, j in zip(*np.nonzero(alt >= .32))]
+    (OUT / 'snapshot.json').write_text(json.dumps(dict(built_utc=built, area=AREA, cell=CELL, ocean_cells=ocean, cells=shaded,
+                                                       variants={'no_temp': shaded_alt}), separators=(',', ':')))
     track_record(logs)
     log(f'{len(feats)} squares, top spots {[(t["lat"], t["lon"]) for t in top]}, sources {sources}')
 
@@ -483,11 +489,14 @@ def track_record(logs):
     for f in sorted(hist.glob('*.json')) if hist.exists() else []:
         try:
             d = json.loads(f.read_text()); d['t'] = parse_time(d['built_utc'])
-            d['lookup'] = {(c[0], c[1]): c[2] / 1000 for c in d['cells']}; snaps.append(d)
+            d['lookup'] = {(c[0], c[1]): c[2] / 1000 for c in d['cells']}
+            alt = (d.get('variants') or {}).get('no_temp')
+            d['lookup_alt'] = {(c[0], c[1]): c[2] / 1000 for c in alt} if alt is not None else None
+            snaps.append(d)
         except Exception as e:
             log('bad snapshot', f.name, e)
     cls_of = lambda v: next((c for t, c in [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')] if v >= t), 'Not shaded')
-    entries, cover_hi, cover_good = [], [], []
+    entries, cover_hi, cover_good, alt_cover = [], [], [], []
     for r in sorted(logs, key=lambda x: x['when']):
         before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
         e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']))
@@ -499,6 +508,10 @@ def track_record(logs):
             e['scored'] = False; e['why'] = 'outside the grid area'; entries.append(e); continue
         v = s['lookup'].get((i, j), 0.0)
         e.update(scored=True, score=round(v, 2), cls=cls_of(v), grid_built=s['built_utc'])
+        if s['lookup_alt'] is not None:
+            va = s['lookup_alt'].get((i, j), 0.0); e.update(score_no_temp=round(va, 2), cls_no_temp=cls_of(va))
+            n = max(s['ocean_cells'], 1)
+            alt_cover.append((sum(1 for x in s['lookup_alt'].values() if x >= .77) / n, sum(1 for x in s['lookup_alt'].values() if x >= .62) / n))
         n = max(s['ocean_cells'], 1)
         cover_hi.append(sum(1 for x in s['lookup'].values() if x >= .77) / n)
         cover_good.append(sum(1 for x in s['lookup'].values() if x >= .62) / n)
@@ -511,10 +524,22 @@ def track_record(logs):
                area_share=dict(high_plus=round(sum(cover_hi) / len(cover_hi), 3) if cover_hi else None,
                                good_plus=round(sum(cover_good) / len(cover_good), 3) if cover_good else None),
                not_scored=len(entries) - len(sc), entries=entries[-50:],
+               comparison=compare(sc, alt_cover),
                by_region={reg: dict(scored=sum(1 for e in st if e['region'] == reg), high_plus=sum(1 for e in st if e['region'] == reg and e['score'] >= .77))
                           for reg in REGIONS})
     (OUT / 'track-record.json').write_text(json.dumps(out, indent=1))
     log('track record:', {k: out[k] for k in ('snapshots', 'strikes', 'quiet', 'area_share', 'not_scored')})
+
+
+def compare(scored, alt_cover):
+    """With vs without sea temperature, over logs scored by grids that kept both versions."""
+    both = [e for e in scored if 'score_no_temp' in e]
+    st = [e for e in both if e['strike']]; qu = [e for e in both if not e['strike']]
+    avg = lambda xs: round(sum(xs) / len(xs), 3) if xs else None
+    side = lambda key: dict(strikes_high_plus=sum(e[key] >= .77 for e in st), strikes_good_plus=sum(e[key] >= .62 for e in st),
+                            quiet_below_good=sum(e[key] < .62 for e in qu))
+    return dict(strikes=len(st), quiet=len(qu), with_temp=side('score'), without_temp=side('score_no_temp'),
+                area_share_without_temp=dict(high_plus=avg([a for a, _ in alt_cover]), good_plus=avg([b for _, b in alt_cover])))
 
 
 # ---------------- coast

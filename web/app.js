@@ -171,12 +171,16 @@
         `<b>${s.good_plus} of ${s.scored}</b> were Good or better (${pct(sh.good_plus)} of the area).` +
         (t.quiet.scored ? ` Quiet logs: ${t.quiet.below_good} of ${t.quiet.scored} were in squares below Good.` : '') +
         (t.not_scored ? ` <span class="small">(${t.not_scored} log${t.not_scored > 1 ? 's' : ''} not counted)</span>` : '') +
+        (t.comparison && t.comparison.strikes ? `<br><span class="small"><b>With vs without sea temperature</b> (${t.comparison.strikes} strike${t.comparison.strikes > 1 ? 's' : ''}): ` +
+          `High+ ${t.comparison.with_temp.strikes_high_plus} vs ${t.comparison.without_temp.strikes_high_plus} · ` +
+          `Good+ ${t.comparison.with_temp.strikes_good_plus} vs ${t.comparison.without_temp.strikes_good_plus}` +
+          (t.comparison.quiet ? ` · quiet logs in low squares ${t.comparison.with_temp.quiet_below_good} vs ${t.comparison.without_temp.quiet_below_good}` : '') + '</span>' : '') +
         (t.by_region ? '<br><span class="small">' + Object.entries(t.by_region).filter(([, r]) => r.scored).map(([k, r]) => `${esc(k)}: ${r.high_plus} of ${r.scored}`).join(' · ') + '</span>' : '')
       : `Collecting. ${t.snapshots} grid${t.snapshots === 1 ? '' : 's'} saved so far; logs made from now on will be scored against them.` +
         (t.not_scored ? ` ${t.not_scored} earlier log${t.not_scored > 1 ? 's' : ''} not counted.` : '');
     $('trackList').innerHTML = t.entries.slice(-12).reverse().map(e =>
       `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count}${e.region ? ' · ' + esc(e.region) : ''} · ` +
-      (e.scored ? `<b>${esc(e.cls)}</b>` : 'not counted') + '</li>').join('');
+      (e.scored ? `<b>${esc(e.cls)}</b>${e.cls_no_temp && e.cls_no_temp !== e.cls ? ` <span class="small">(without temperature: ${esc(e.cls_no_temp)})</span>` : ''}` : 'not counted') + '</li>').join('');
   }
   $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
 
