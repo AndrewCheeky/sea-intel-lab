@@ -293,7 +293,9 @@ def main():
                 note='Relative ranking of conditions. Not a probability, not a fish forecast, not for navigation.')
     (OUT / 'grid.geojson').write_text(json.dumps({'type': 'FeatureCollection', 'features': feats}, separators=(',', ':')))
     (OUT / 'top-spots.json').write_text(json.dumps(top, indent=1))
-    (OUT / 'releases.json').write_text(json.dumps([{k: r[k] for k in ('date', 'lat', 'lon', 'note') if k in r} for r in rel], indent=1))
+    # public page: date, species and position only (notes stay in the private sheet)
+    (OUT / 'releases.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
+                                                    'note': f"{r['species']} × {r['count']}"} for r in rel], indent=1))
     (OUT / 'meta.json').write_text(json.dumps(meta, indent=1))
     (OUT / 'coast.geojson').write_text(json.dumps(coast, separators=(',', ':')))
     try: (OUT / 'banks.json').write_bytes(fetch(BASE + 'banks.json'))
