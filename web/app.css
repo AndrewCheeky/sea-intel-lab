@@ -83,3 +83,8 @@ dialog input,dialog select{display:block;width:100%;margin-top:4px;min-height:44
 .outcome{border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin:8px 0;display:flex;gap:14px;flex-wrap:wrap}
 .outcome legend{font-size:12px;color:var(--muted);padding:0 4px}
 .outcome label{display:flex;align-items:center;gap:6px;margin:0;font-weight:600}
+.shareOpts{display:grid;gap:8px;margin:10px 0}
+.shareOpts button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#12345a;color:var(--ink);font:inherit}
+.shareOpts button small{color:var(--muted);font-size:12px}
+.shareOpts button.chosen{border-color:var(--accent);outline:2px solid var(--accent)}
+#shareDlg h2 small{font-size:13px;color:var(--muted);font-weight:600}

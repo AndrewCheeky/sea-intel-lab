@@ -133,7 +133,7 @@
     const all = store.get(LOGS, []), l = all.find(x => (id && x.id === id) || x.time === time); if (!l) return;
     if (!confirm(`Delete "${l.species}" logged ${new Date(l.time).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}?`)) return;
     store.set(LOGS, all.filter(x => x !== l && !(x.id && x.id === l.id)));
-    const hidden = store.get(HIDDEN, []); hidden.push(logKey(l.time, l.lat)); store.set(HIDDEN, hidden.slice(-200));
+    const hidden = store.get(HIDDEN, []); hidden.push(logKey(l.time, l.lat)); if (l.id) hidden.push('id:' + l.id); store.set(HIDDEN, hidden.slice(-300));
     if (l.synced && l.id) { const d = store.get(DELS, []); if (!d.includes(l.id)) d.push(l.id); store.set(DELS, d); }
     map.closePopup(); drawMyLogs(); drawSightings(); toast('Log deleted'); sendPending();
   }
@@ -147,7 +147,7 @@
   const noteText = note => String(note || '').replace(/^\[[A-Za-z ,]+\]\s*/, '');
   function drawMyLogs() {
     myLayer.clearLayers(); const logs = store.get(LOGS, []);
-    const hidden = new Set(store.get(HIDDEN, [])), mineKeys = new Set();
+    const hidden = new Set(store.get(HIDDEN, [])), mineKeys = new Set(), mineIds = new Set(logs.map(l => l.id).filter(Boolean));
     logs.forEach(l => {
       if (SIGHT.includes(l.species)) return;                         // sightings have their own symbol
       mineKeys.add(logKey(l.time, l.lat));
@@ -158,13 +158,14 @@
         : L.marker([l.lat, l.lon], {icon: star(isToday(l.time) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 700})).bindPopup(pop).addTo(myLayer);
     });
     for (const r of pubStrikes) {
-      const k = logKey(r.date, r.lat); if (mineKeys.has(k) || hidden.has(k)) continue;
+      const k = logKey(r.date, r.lat); if (mineKeys.has(k) || hidden.has(k) || (r.id && (mineIds.has(r.id) || hidden.has('id:' + r.id)))) continue;
       L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 650, title: 'Strike ' + r.date.slice(0, 10)})
-        .bindPopup(`<b>${esc(r.note || 'Strike')}</b><br>${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(r.lat, r.lon)}`).addTo(myLayer);
+        .bindPopup(`<b>${esc(r.note || 'Strike')}</b><br>${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${r.bank ? `Near ${esc(r.bank)} <small>(general area only)</small>` : pos2txt(r.lat, r.lon)}`).addTo(myLayer);
     }
     const waiting = logs.filter(l => !l.synced).length;
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
-    $('codeState').textContent = store.get(CODE, '') ? 'set' : 'not set';
+    $('codeState').textContent = store.get(CODE, '') ? (store.get('sil.boat', '') || 'set') : 'not set';
+    $('shareState').textContent = SHARE_TXT[store.get('sil.share', '')] || 'not chosen';
   }
   let pendingPos = null;
   $('logBtn').addEventListener('click', () => {
@@ -185,7 +186,7 @@
     logs.push({id: newId(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
                count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: !!last, synced: false});
     store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
-    toast(store.get(CODE, '') ? 'Saved – sending when there is signal' : 'Saved on this phone (set a logging code to send it)');
+    toast(store.get(CODE, '') ? 'Saved – sending when there is signal' : 'Saved on this phone (enter your boat code under More to send it)');
     sendPending();
   });
   // Send logs to the Google Sheet; anything that fails stays queued and is retried later.
@@ -198,7 +199,7 @@
         let j = null;
         try { const r = await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', del: '1', code, id})}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }
         if (j && j.ok) store.set(DELS, store.get(DELS, []).filter(x => x !== id));
-        else if (j && /code/.test(j.error || '')) { toast('Logging code not accepted – check it under More'); break; }
+        else if (j && /code/.test(j.error || '')) { toast('Boat code not accepted – check it under More'); break; }
         else break;
       }
       for (const l of store.get(LOGS, []).filter(x => !x.synced)) {
@@ -206,18 +207,45 @@
         const q = new URLSearchParams({action: 'strikelog', code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0'});
         let j = null;
         try { const r = await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }       // no signal: try later
+        if (j && j.ok && 'share' in j) { store.set('sil.share', j.share || ''); if (!j.share && !askSharing.done) { askSharing.done = true; askSharing(); } }
         if (j && j.ok) { const all = store.get(LOGS, []); const m = all.find(x => x.id === l.id || x.time === l.time); if (m) { m.synced = true; m.id = l.id; } store.set(LOGS, all); }
-        else if (j && /code/.test(j.error || '')) { toast('Logging code not accepted – check it under More'); break; }
+        else if (j && /code/.test(j.error || '')) { toast('Boat code not accepted – check it under More'); break; }
         else if (j) { toast('Not sent: ' + (j.error || 'unknown')); break; }
       }
     } finally { sending = false; drawMyLogs(); }
   }
   window.addEventListener('online', sendPending);
   setInterval(sendPending, 120000);
-  $('codeBtn').addEventListener('click', () => {
-    const v = prompt('Logging code (from Andrew). Leave empty to stop sending.', store.get(CODE, ''));
-    if (v === null) return; store.set(CODE, v.trim()); drawMyLogs(); if (v.trim()) { toast('Code saved'); sendPending(); }
+  // ---------- boat code and sharing (per boat: research only / general area / everything)
+  const SHARE_TXT = {research: 'Research only', bank: 'General area (bank)', all: 'Everything'};
+  async function shareCall(level) {
+    const code = store.get(CODE, ''); if (!code) return null;
+    const q = new URLSearchParams({action: 'strikelog', op: 'share', code}); if (level) q.set('level', level);
+    try { const j = await (await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'})).json(); if (j && j.ok) { store.set('sil.boat', j.boat || ''); store.set('sil.share', j.share || ''); drawMyLogs(); } return j; }
+    catch { return null; }
+  }
+  function askSharing() {
+    $('shareBoat').textContent = store.get('sil.boat', '') ? `for ${store.get('sil.boat', '')}` : '';
+    const cur = store.get('sil.share', ''); document.querySelectorAll('#shareDlg [value]').forEach(b => b.classList.toggle('chosen', b.value === cur));
+    $('shareDlg').showModal();
+  }
+  $('shareDlg').addEventListener('close', async () => {
+    const v = $('shareDlg').returnValue; if (!SHARE_TXT[v]) return;
+    if (!store.get(CODE, '')) return toast('Enter your boat code first');
+    const j = await shareCall(v);
+    toast(j && j.ok ? `Sharing: ${SHARE_TXT[j.share]} – applies to every phone on ${j.boat || 'your boat'}` : j ? 'Not changed: ' + (j.error || 'unknown') : 'No signal – try again when connected');
   });
+  $('shareBtn').addEventListener('click', () => askSharing());
+  $('codeBtn').addEventListener('click', async () => {
+    const v = prompt('Boat code (each boat has its own). Leave empty to stop sending.', store.get(CODE, ''));
+    if (v === null) return; store.set(CODE, v.trim()); store.set('sil.share', ''); store.set('sil.boat', ''); drawMyLogs();
+    if (!v.trim()) return;
+    const j = await shareCall();
+    if (!j) { toast('Code saved – it will be checked when there is signal'); return; }
+    if (!j.ok) { toast('Boat code not accepted'); return; }
+    toast(`Welcome ${j.boat}`); sendPending();
+    if (!j.share) askSharing();                                     // first use on this boat: ask for consent
+  });;
 
   // ---------- track record
   async function loadTrack() {
@@ -256,14 +284,16 @@
   async function drawSightings() {
     sightLayer.clearLayers();
     let list = []; try { list = await getJSON('sightings.json'); } catch {}
-    const mine = store.get(LOGS, []).filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l}));
+    const mine = store.get(LOGS, []).filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l, id: l.id}));
+    const mineIds = new Set(mine.map(m => m.id).filter(Boolean));
     const seen = new Set(store.get(HIDDEN, []).map(k => k));
     for (const s of [...mine, ...list]) {
+      if (!s.own && s.id && (mineIds.has(s.id) || seen.has('id:' + s.id))) continue;
       const age = (Date.now() - new Date(s.date)) / 36e5, k = logKey(s.date, s.lat);
       if (age > 24 || age < -1 || seen.has(k)) continue; seen.add(k);
       L.marker([s.lat, s.lon], {zIndexOffset: 600, icon: L.divIcon({className: 'seen', iconSize: [24, 24], iconAnchor: [12, 12],
         html: `<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="opacity:${Math.max(.35, 1 - age / 24)}"><circle cx="12" cy="12" r="10" fill="#7CFC9A" stroke="#061b33" stroke-width="2"/><path d="M6 13c2-2 4-2 6 0 2-2 4-2 6 0" fill="none" stroke="#061b33" stroke-width="2" stroke-linecap="round"/></svg>`})})
-        .bindPopup(`<b>${esc(s.what)}</b><br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : ''}`).addTo(sightLayer);
+        .bindPopup(`<b>${esc(s.what)}</b><br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${s.bank ? `Near ${esc(s.bank)} <small>(general area only)</small>` : pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : ''}`).addTo(sightLayer);
     }
   }
   const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];
