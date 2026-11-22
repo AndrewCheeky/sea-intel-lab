@@ -132,7 +132,21 @@ def read_depth():
     if cache.exists() and cache.stat().st_size > 1000:
         txt = cache.read_text()
     else:
-        txt = fetch('https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.csv?' + q, timeout=90).decode()
+        # NOAA ERDDAP sometimes refuses large or repeated requests: ask in 1° bands, trying two mirrors.
+        parts = []
+        lat0 = AREA['south'] - .05
+        while lat0 < AREA['north'] + .05:
+            lat1 = min(lat0 + 1, AREA['north'] + .05)
+            qq = (f"altitude%5B({lat0:.2f}):1:({lat1:.2f})%5D%5B({AREA['west'] - .05}):1:({AREA['east'] + .05})%5D")
+            for host in ('coastwatch.pfeg.noaa.gov', 'upwell.pfeg.noaa.gov'):
+                try:
+                    t = fetch(f'https://{host}/erddap/griddap/etopo180.csv?' + qq, timeout=90, tries=2).decode(); break
+                except Exception as e:
+                    t = None; last = e
+            if t is None: raise last
+            parts.append(t if not parts else '\n'.join(t.splitlines()[2:]))
+            lat0 = lat1
+        txt = '\n'.join(parts)
         cache.parent.mkdir(exist_ok=True); cache.write_text(txt)
     rows = list(csv.reader(io.StringIO(txt)))[2:]
     lat = np.array(sorted({float(r[0]) for r in rows})); lon = np.array(sorted({float(r[1]) for r in rows}))
