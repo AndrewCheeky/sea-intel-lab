@@ -1,5 +1,5 @@
 /* Keeps the strike grid usable offshore: the page and the latest grid are saved when opened with signal. */
-const CACHE = 'sil-v22';
+const CACHE = 'sil-v23';
 const SHELL = ['./', 'index.html', 'app.js?v=21', 'app.css?v=15', 'manifest.webmanifest', 'sky.js?v=2',
   'vendor/leaflet/leaflet.css', 'vendor/leaflet/leaflet.js'];
 const DATA = ['grid.json', 'top-spots.json', 'releases.json', 'meta.json', 'coast.geojson', 'banks.json', 'strike-grid.kml', 'top-spots.gpx', 'track-record.json', 'contours.geojson', 'times.json', 'sightings.json', 'conditions.json', 'weed.json', 'confidence.json'];
