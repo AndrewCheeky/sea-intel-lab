@@ -14,7 +14,6 @@
   <div class="title">
     <strong>Marlin strike grid</strong> <span class="lab">LAB</span>
     <div id="built" class="sub">Loading…</div>
-    <button id="confBtn" class="conf" aria-expanded="false" hidden>Picture: –</button>
   </div>
   <label class="area"><span class="vh">Area</span>
     <select id="areaSel">
@@ -32,7 +31,7 @@
   <div id="chips" class="chips"></div>
 </section>
 
-<button id="plan" class="plan" hidden></button>
+<button id="plan" class="plan" aria-expanded="false" hidden></button>
 <button id="newVer" class="newver" hidden>New version ready · tap to refresh</button>
 
 <div id="map" aria-label="Map of the strike grid south of Kingston"></div>
@@ -124,6 +123,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=20"></script>
+<script src="app.js?v=21"></script>
 </body>
 </html>
