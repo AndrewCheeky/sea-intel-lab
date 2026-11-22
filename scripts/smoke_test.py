@@ -60,7 +60,7 @@ async def main():
         await pg.evaluate("document.getElementById('shareDlg').close('cancel')")
         print('sharing dialog:', share_open)
         await pg.evaluate("const t = document.getElementById('tiles'); t.checked = true; t.dispatchEvent(new Event('change'))"); await pg.wait_for_timeout(3000)
-        tiles_ok = await pg.evaluate("[...document.querySelectorAll('.leaflet-tile-pane img')].filter(i => i.complete && i.naturalWidth > 0).length")
+        tiles_ok = await pg.evaluate("[...document.querySelectorAll('.leaflet-tile-pane img')].filter(i => i.complete && i.naturalWidth > 0).map(i => new URL(i.src).host).join(' ')")
         print('street map tiles loaded:', tiles_ok)
         await pg.evaluate("const t = document.getElementById('tiles'); t.checked = false; t.dispatchEvent(new Event('change'))")
         await pg.evaluate("localStorage.setItem('sil.code', '\"\"')")
