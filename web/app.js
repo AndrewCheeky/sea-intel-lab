@@ -22,7 +22,8 @@
   const COAST_OVER_TILES = {color: '#b6c9d0', weight: 0, fillOpacity: 0};
   const sea = L.layerGroup().addTo(map);
 
-  let cells = new Map(), hot = [], meta = {}, area = null, cellDeg = .01;
+  let cells = new Map(), hot = [], meta = {}, area = null, cellDeg = .01, topSpots = [];
+  const topMarkers = {};
   const key = (la, lo) => `${Math.floor((la - area.south) / cellDeg)}|${Math.floor((lo - area.west) / cellDeg)}`;
   const CLASSES = [[.9, 'Highest'], [.77, 'High'], [.62, 'Good'], [.47, 'Medium'], [.32, 'Low']];
   const VIEWS = {south: [[17.45, -77.45], [18.0, -76.25]], east: [[17.3, -76.6], [18.8, -75.4]],
@@ -57,8 +58,10 @@
       .bindPopup(() => bankPopup(b), {maxWidth: 300}).addTo(sea));
     rel.forEach(r => L.marker([r.lat, r.lon], {icon: L.divIcon({className: '', html: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="#00e5ff" stroke="#061b33" stroke-width="1.5"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11]}),
       title: 'Release ' + r.date.slice(0, 10)}).bindPopup(`Release ${esc(r.date.slice(0, 10))}<br>${pos2txt(r.lat, r.lon)}${r.note ? '<br>' + esc(r.note) : ''}`).addTo(sea));
-    top.forEach(t => L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: `${t.region || ''} top ${t.rank}`, zIndexOffset: 500})
+    topSpots = top;
+    top.forEach(t => topMarkers[`${t.region}|${t.rank}`] = L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: `${t.region || ''} top ${t.rank}`, zIndexOffset: 500})
       .bindPopup(`<b>${esc(t.region || '')} · spot ${t.rank}</b><br>${pos2txt(t.lat, t.lon)}`).addTo(sea));
+    renderPlan();
     const v = store.get('sil.view', 'south'); $('areaSel').value = v; map.fitBounds(VIEWS[v] || VIEWS.south);
     drawMyLogs();
   }
@@ -94,7 +97,8 @@
     $('boatBar').hidden = false;
     $('pos').textContent = pos2txt(la, lo);
     const c = area && cells.get(key(la, lo));
-    $('here').textContent = c ? `${c.cls} (${c.score.toFixed(2)})` : 'Not shaded';
+    $('here').textContent = c ? c.cls : 'Not shaded';
+    if (Date.now() - (onPos.planAt || 0) > 30000) { onPos.planAt = Date.now(); renderPlan(); }
     let best = null, bd = 1e9;
     for (const h of hot) { const d = nm(here, [h.lat, h.lon]); if (d < bd) { bd = d; best = h; } }
     const cp = nearestCond(la, lo), ck = condIndex();
@@ -198,7 +202,7 @@
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
   });
 
-  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); renderTimes(); renderConf(); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
+  $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); renderTimes(); renderConf(); renderPlan(); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
 
   // ---------- birds / bait / weed sightings (logged like releases, short-lived on the map)
   const sightLayer = L.layerGroup().addTo(map);
@@ -240,21 +244,28 @@
     return [BANKLIST.reduce((t, b) => t + b.lat, 0) / BANKLIST.length, BANKLIST.reduce((t, b) => t + b.lon, 0) / BANKLIST.length];
   }
   function regionFor(la, lo) { let best = 'south', bd = 1e9; for (const k of ['south', 'east', 'north']) { const d = nm([la, lo], POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
-  function renderTimes() {
-    const now = new Date(), day = new Date(now); day.setHours(0, 0, 0, 0); if (tomorrow) day.setDate(day.getDate() + 1);
-    const end = new Date(day.getTime() + 864e5), mid = new Date(day.getTime() + 432e5);
-    const [la, lo] = islandCentre(), ref = last || POINTS[store.get('sil.view', 'south')] || POINTS.south, pk = regionFor(ref[0], ref[1]);
+  // Dawn/dusk windows and the major/minor feeding periods for one local day (island-wide), with Prime marked.
+  function feeding(day) {
+    const [la, lo] = islandCentre(), mid = new Date(day.getTime() + 432e5);
     const sun = Sky.sunTimes(mid, la, lo);
     const win = [
       {start: sun.dawn, end: new Date(sun.sunrise.getTime() + 36e5), label: `Dawn ${hspan(sun.dawn, new Date(sun.sunrise.getTime() + 36e5))}`, why: 'First light to an hour after sunrise: fish often feed near the surface.'},
       {start: new Date(sun.sunset.getTime() - 36e5), end: sun.dusk, label: `Dusk ${hspan(new Date(sun.sunset.getTime() - 36e5), sun.dusk)}`, why: 'The last hour of sun to last light: another strong feeding time.'}];
-    const items = win.map(w => ({...w, kind: 'light'}));
     const overlaps = (x, w) => x.start < w.end && x.end > w.start;
     let nM = 0, nm2 = 0;
     const sol = Sky.solunar(day, la, lo).map(e => e.kind === 'major'
       ? {...e, label: `Major ${++nM} ${hspan(e.start, e.end)}`, why: `Major feeding period: the moon is ${e.what === 'overhead' ? 'overhead' : 'underfoot'} at ${hm(e.at)}. About two hours. Strongest when it lines up with dawn, dusk or a tide turn.`}
       : {...e, label: `Minor ${++nm2} ${hspan(e.start, e.end)}`, why: `Minor feeding period: moon${e.what} at ${hm(e.at)}. About an hour. Worth more when it falls at dawn or dusk.`});
-    for (const e of sol) { e.prime = win.some(w => overlaps(e, w)); items.push(e); }
+    for (const e of sol) e.prime = win.some(w => overlaps(e, w));
+    return {win, sol};
+  }
+  function renderTimes() {
+    const now = new Date(), day = new Date(now); day.setHours(0, 0, 0, 0); if (tomorrow) day.setDate(day.getDate() + 1);
+    const end = new Date(day.getTime() + 864e5), mid = new Date(day.getTime() + 432e5);
+    const [la, lo] = islandCentre(), ref = last || POINTS[store.get('sil.view', 'south')] || POINTS.south, pk = regionFor(ref[0], ref[1]);
+    const {win, sol} = feeding(day);
+    const items = win.map(w => ({...w, kind: 'light'}));
+    items.push(...sol);
     const P = timesData && timesData.points && timesData.points[pk];
     if (P) {
       for (const t of P.tides) { const d = new Date(t.time); if (d >= day && d < end) items.push({start: new Date(d - 27e5), end: new Date(+d + 27e5), at: d, kind: 'tide', label: `Tide ${t.type} ${hm(d)}`, why: `The tide turns (${t.type}). Bait often moves when water starts to move again.`}); }
@@ -277,7 +288,7 @@
   }
   function setDay(t) { tomorrow = t; showAllTimes = false; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
   $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
-  getJSON('banks.json').then(bs => { BANKLIST = bs.filter(b => b.lat != null && b.lon != null); renderTimes(); }).catch(() => {});
+  getJSON('banks.json').then(bs => { BANKLIST = bs.filter(b => b.lat != null && b.lon != null); renderTimes(); renderPlan(); }).catch(() => {});
   getJSON('times.json').then(t => { timesData = t; renderTimes(); }).catch(() => renderTimes());
   setInterval(renderTimes, 300000);
 
@@ -389,12 +400,58 @@
     $('confList').innerHTML = Object.entries(confData).map(([r, v]) => `<div class="confRow"><b>${esc(r)}</b><span class="conf ${v.level}">${v.level}</span><ul>${v.why.map(w => `<li>${esc(w)}</li>`).join('')}</ul></div>`).join('');
   }
   $('confBtn').addEventListener('click', () => sheet($('confBtn'), $('confSheet')));
-  getJSON('conditions.json').then(c => { cond = c; if (map.hasLayer(arrowLayer)) drawArrows(); renderConf(); }).catch(() => {});
+  getJSON('conditions.json').then(c => { cond = c; if (map.hasLayer(arrowLayer)) drawArrows(); renderConf(); renderPlan(); }).catch(() => {});
   getJSON('weed.json').then(w => { weedData = w; drawWeed(w); $('weedDate').textContent = `${w.patches.length} patches · 3 days to ${w.date}`; }).catch(() => { $('weedDate').textContent = 'not available yet'; });
-  getJSON('confidence.json').then(c => { confData = c; renderConf(); }).catch(() => {});
+  getJSON('confidence.json').then(c => { confData = c; renderConf(); renderPlan(); }).catch(() => {});
   if (store.get('sil.arrows', false)) { $('curArrows').checked = true; arrowLayer.addTo(map); }
   if (store.get('sil.weed', false)) { $('weedLayer').checked = true; weedLayer.addTo(map); }
   setInterval(() => { if (map.hasLayer(arrowLayer)) drawArrows(); }, 600000);
+
+
+  // ---------- Today's plan: one card that pulls the best spot, best time, sea and confidence together
+  function renderPlan() {
+    if (!topSpots.length) return;
+    const viewReg = VIEW_REGION[store.get('sil.view', 'south')] || 'South coast';
+    let reg = viewReg;
+    if (last) { let bd = 1e9; for (const t of topSpots) { const d = nm(last, [t.lat, t.lon]); if (d < bd) { bd = d; reg = t.region; } } }
+    const spot = topSpots.find(t => t.region === reg && t.rank === 1) || topSpots[0];
+    // where
+    let where;
+    if (last) { const d = nm(last, [spot.lat, spot.lon]); where = d < .5 ? "you're on it" : `${d.toFixed(0)} NM ${compass(bearing(last, [spot.lat, spot.lon]))} of you`; }
+    else if (BANKLIST.length) {
+      let b = null, bd = 1e9; for (const x of BANKLIST) { const d = nm([x.lat, x.lon], [spot.lat, spot.lon]); if (d < bd) { bd = d; b = x; } }
+      where = bd < 1 ? `at ${b.name}` : `${bd.toFixed(0)} NM ${compass(bearing([b.lat, b.lon], [spot.lat, spot.lon]))} of ${b.name}`;
+    } else where = pos2txt(spot.lat, spot.lon);
+    // when: the next Prime period in the next 18 hours, otherwise the next feeding period
+    const now = new Date(), d0 = new Date(now); d0.setHours(0, 0, 0, 0); const d1 = new Date(d0.getTime() + 864e5);
+    const ahead = [...feeding(d0).sol, ...feeding(d1).sol].filter(e => e.end > now);
+    const best = ahead.find(e => e.prime && e.start - now < 18 * 36e5) || ahead[0];
+    let when = '–', at = now;
+    if (best) {
+      at = best.start > now ? best.start : now;
+      const tag = best.prime ? 'Prime ' : '', kind = best.kind === 'major' ? 'major' : 'minor';
+      when = best.start <= now ? `${tag}${kind} on now until ${hm(best.end)}` : `${tag}${kind} ${best.start >= d1 ? 'tomorrow ' : ''}${hspan(best.start, best.end)}`;
+    }
+    // sea at that time
+    let seaTxt = '';
+    if (cond) {
+      const p = cond.points.find(x => x.kind === 'spot' && x.name === `${spot.region} spot ${spot.rank}`) || nearestCond(spot.lat, spot.lon);
+      const k = Math.floor((at - Date.parse(cond.start_utc)) / 36e5);
+      if (p && k >= 0 && k < 36) {
+        const bits = [];
+        if (p.wave[k] != null) bits.push(`Seas ${p.wave[k].toFixed(1)} m`);
+        if (p.wind[k] != null) bits.push(`wind ${p.wind[k]} kn ${compass(p.wdir[k])}`);
+        if (p.cur[k] != null) bits.push(`current running ${compass(p.cdir[k])}`);
+        seaTxt = bits.join(', ');
+      }
+    }
+    const c = confData && confData[spot.region];
+    const el = $('plan'); el.hidden = false;
+    el.innerHTML = `<span class="k">Today's plan</span><b>${esc(spot.region)} spot ${spot.rank}</b>, ${esc(where)} · <b>${esc(when)}</b>` +
+      (seaTxt ? ` · ${esc(seaTxt)}` : '') + (c ? ` · <span class="conf ${c.level}">Picture: ${c.level}</span>` : '');
+    el.onclick = () => { map.setView([spot.lat, spot.lon], Math.max(map.getZoom(), 12)); const m = topMarkers[`${spot.region}|${spot.rank}`]; if (m) m.openPopup(); };
+  }
+  setInterval(renderPlan, 300000);
 
   // ---------- sheets / tiles
   function sheet(btn, el) { const open = el.hidden; document.querySelectorAll('.sheet').forEach(s => s.hidden = true);
@@ -412,5 +469,10 @@
 
   loadTrack(); setTimeout(sendPending, 1500); drawSightings();
   load().catch(e => { $('built').textContent = 'Could not load the grid. ' + (navigator.onLine ? 'Try again shortly.' : 'Open it once with signal.'); console.error(e); });
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js').then(r => r.update()).catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) $('newVer').hidden = false; });
+    $('newVer').addEventListener('click', () => location.reload());
+  }
 })();
