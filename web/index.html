@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#061b33">
+<title>Strike Grid (lab)</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="app.css?v=1">
+</head>
+<body>
+<header class="top">
+  <div class="title">
+    <strong>Marlin strike grid</strong> <span class="lab">LAB</span>
+    <div id="built" class="sub">Loading…</div>
+  </div>
+  <button id="infoBtn" class="icon" aria-label="About this map" aria-expanded="false">?</button>
+</header>
+
+<div id="map" aria-label="Map of the strike grid south of Kingston"></div>
+
+<section id="boatBar" class="boatbar" hidden aria-live="polite">
+  <div><span class="k">You</span> <b id="pos">–</b></div>
+  <div><span class="k">Square</span> <b id="here">–</b></div>
+  <div><span class="k">Best nearby</span> <b id="best">–</b></div>
+</section>
+
+<nav class="actions">
+  <button id="boatBtn" class="primary">Show my boat</button>
+  <button id="followBtn" disabled aria-pressed="false">Follow</button>
+  <button id="logBtn">Log release</button>
+  <button id="moreBtn" aria-expanded="false">More</button>
+</nav>
+
+<div id="more" class="sheet" hidden>
+  <a class="row" href="strike-grid.kml" download>Download KML <small>Google Earth / My Maps</small></a>
+  <a class="row" href="top-spots.gpx" download>Download GPX <small>Top spots for Navionics</small></a>
+  <label class="row"><input type="checkbox" id="tiles"> Detailed background map <small>needs signal</small></label>
+  <button class="row" id="sendLogs">Send my logged releases <small id="logCount">none yet</small></button>
+</div>
+
+<div id="info" class="sheet info" hidden>
+  <h2>How to read it</h2>
+  <div class="legend">
+    <span><i style="background:#8c0040"></i>Highest</span><span><i style="background:#d91a1a"></i>High</span>
+    <span><i style="background:#ff801a"></i>Good</span><span><i style="background:#ffd933"></i>Medium</span>
+    <span><i style="background:#fff266"></i>Low</span>
+  </div>
+  <p>Each square is about 0.6 NM. Its score ranks conditions in this area against each other: the drop-off,
+  the chlorophyll front, past releases, zooplankton and surface convergence. <b>It is not a probability and not a fish forecast.</b></p>
+  <p>Numbered circles are the best squares (at least 2 NM apart). Stars are past releases. Tap a square to see why it scored.</p>
+  <p id="sources" class="small"></p>
+  <p class="small">Experimental. Positions are approximate. Not for navigation – use your chart and chartplotter.
+  Your position stays on your phone; it is only sent if you choose “Send my logged releases”.</p>
+</div>
+
+<dialog id="logDlg">
+  <form method="dialog" id="logForm">
+    <h2>Log a release</h2>
+    <p id="logWhere" class="small">Uses your boat position.</p>
+    <label>Species
+      <select id="species"><option>Blue marlin</option><option>White marlin</option><option>Sailfish</option><option>Wahoo</option><option>Dolphin (mahi)</option><option>Tuna</option><option>No strikes here</option><option>Other</option></select>
+    </label>
+    <label>How many <input id="count" type="number" min="0" max="50" value="1" inputmode="numeric"></label>
+    <label>Note <input id="note" type="text" maxlength="120" placeholder="optional"></label>
+    <div class="dlgBtns"><button value="cancel" formnovalidate>Cancel</button><button value="save" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>
