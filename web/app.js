@@ -25,7 +25,7 @@
   map.createPane('pins').style.zIndex = 450;
   const pinRenderer = L.svg({pane: 'pins'});
 
-  let cells = new Map(), hot = [], meta = {}, area = null, cellDeg = .01, topSpots = [];
+  let cells = new Map(), hot = [], meta = {}, area = null, cellDeg = .01, topSpots = [], pubStrikes = [];
   const topMarkers = {};
   const key = (la, lo) => `${Math.floor((la - area.south) / cellDeg)}|${Math.floor((lo - area.west) / cellDeg)}`;
   const CLASSES = [[.9, 'Highest'], [.77, 'High'], [.62, 'Good'], [.47, 'Medium'], [.32, 'Low']];
@@ -60,8 +60,7 @@
     }
     banks.forEach(b => L.circleMarker([b.lat, b.lon], {pane: 'pins', renderer: pinRenderer, radius: 5, color: '#fff', weight: 1.5, fillColor: '#e8475f', fillOpacity: 1})
       .bindPopup(() => bankPopup(b), {maxWidth: 300}).addTo(sea));
-    rel.forEach(r => L.marker([r.lat, r.lon], {icon: L.divIcon({className: '', html: '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="#00e5ff" stroke="#061b33" stroke-width="1.5"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11]}),
-      title: 'Release ' + r.date.slice(0, 10)}).bindPopup(`Release ${esc(r.date.slice(0, 10))}<br>${pos2txt(r.lat, r.lon)}${r.note ? '<br>' + esc(r.note) : ''}`).addTo(sea));
+    pubStrikes = rel; drawMyLogs();
     topSpots = top;
     top.forEach(t => topMarkers[`${t.region}|${t.rank}`] = L.marker([t.lat, t.lon], {icon: L.divIcon({className: 'spot', html: String(t.rank), iconSize: [26, 26]}), title: `${t.region || ''} top ${t.rank}`, zIndexOffset: 500})
       .bindPopup(`<b>${esc(t.region || '')} · spot ${t.rank}</b><br>${pos2txt(t.lat, t.lon)}`).addTo(sea));
@@ -121,7 +120,7 @@
   $('followBtn').addEventListener('click', () => { follow = !follow; $('followBtn').setAttribute('aria-pressed', follow); if (follow && last) map.panTo(last); });
   map.on('dragstart', () => { if (follow) { follow = false; $('followBtn').setAttribute('aria-pressed', false); } });
 
-  // ---------- releases logged on this phone
+  // ---------- strikes logged on this phone
   const LOGS = 'sil.logs', CODE = 'sil.code';
   const LOG_URL = 'https://script.google.com/macros/s/AKfycbzwP_tF1SeJIBgB7HxTRBi374NiF0tQXGcSBFUk7EPPu1rSAepDsALW-iHeny6yo1Y/exec';   // marine Apps Script
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9-]/g, '');
@@ -140,10 +139,29 @@
   }
   map.on('popupopen', e => { const b = e.popup.getElement().querySelector('.delLog'); if (b) b.addEventListener('click', () => deleteLog(b.dataset.id, b.dataset.time)); });
 
+  // Strikes: green star = today, blue star = earlier. Your own logs (with Delete) plus everyone's from the last build.
+  const star = (fill, size = 22) => L.divIcon({className: '', iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.9 7.1.6-5.4 4.7 1.7 7.3L12 17.8 5.7 21.5l1.7-7.3L2 9.5l7.1-.6z" fill="${fill}" stroke="#061b33" stroke-width="1.5"/></svg>`});
+  const isToday = t => new Date(t).toDateString() === new Date().toDateString();
+  const outcomeOf = note => { const m = /^\[([A-Za-z ,]+)\]\s*/.exec(note || ''); return m && m[1] !== 'seen' ? m[1] : ''; };
+  const noteText = note => String(note || '').replace(/^\[[A-Za-z ,]+\]\s*/, '');
   function drawMyLogs() {
     myLayer.clearLayers(); const logs = store.get(LOGS, []);
-    logs.forEach(l => L.circleMarker([l.lat, l.lon], {radius: 6, color: '#061b33', weight: 2, fillColor: l.count === 0 ? '#9aa5b1' : '#00e5ff', fillOpacity: 1})
-      .bindPopup(`${esc(l.species)} × ${l.count}<br>${new Date(l.time).toLocaleString()}<br>${pos2txt(l.lat, l.lon)}${l.note ? '<br>' + esc(l.note) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>${delBtn(l)}`).addTo(myLayer));
+    const hidden = new Set(store.get(HIDDEN, [])), mineKeys = new Set();
+    logs.forEach(l => {
+      if (SIGHT.includes(l.species)) return;                         // sightings have their own symbol
+      mineKeys.add(logKey(l.time, l.lat));
+      const pop = `<b>${esc(l.species)}${l.count > 1 ? ' × ' + l.count : ''}</b>${outcomeOf(l.note) ? ' · ' + esc(outcomeOf(l.note)) : ''}<br>${new Date(l.time).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(l.lat, l.lon)}` +
+        `${noteText(l.note) ? '<br>' + esc(noteText(l.note)) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>${delBtn(l)}`;
+      (l.count === 0 || l.species === 'No strikes here'
+        ? L.circleMarker([l.lat, l.lon], {pane: 'pins', renderer: pinRenderer, radius: 6, color: '#061b33', weight: 2, fillColor: '#9aa5b1', fillOpacity: 1})
+        : L.marker([l.lat, l.lon], {icon: star(isToday(l.time) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 700})).bindPopup(pop).addTo(myLayer);
+    });
+    for (const r of pubStrikes) {
+      const k = logKey(r.date, r.lat); if (mineKeys.has(k) || hidden.has(k)) continue;
+      L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 650, title: 'Strike ' + r.date.slice(0, 10)})
+        .bindPopup(`<b>${esc(r.note || 'Strike')}</b><br>${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(r.lat, r.lon)}`).addTo(myLayer);
+    }
     const waiting = logs.filter(l => !l.synced).length;
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
     $('codeState').textContent = store.get(CODE, '') ? 'set' : 'not set';
@@ -152,16 +170,20 @@
   $('logBtn').addEventListener('click', () => {
     pendingPos = last;
     $('species').value = 'Blue marlin'; $('count').value = 1;
+    for (const id of ['oStrike', 'oLanded', 'oReleased']) $(id).checked = id === 'oStrike';
     $('logWhere').textContent = last ? `At ${pos2txt(last[0], last[1])} (your boat).` : 'No boat position yet – it will use the centre of the map. Tap “Show my boat” first for an exact spot.';
     if (!last) { const c = map.getCenter(); pendingPos = [c.lat, c.lng]; }
     $('logDlg').showModal();
   });
   $('species').addEventListener('change', e => { if (e.target.value === 'No strikes here') $('count').value = 0; });
+  const outcomeTag = () => { if ($('species').value === 'No strikes here') return '';
+    const o = [['oStrike', 'Strike'], ['oLanded', 'Landed'], ['oReleased', 'Released']].filter(([id]) => $(id).checked).map(([, t]) => t);
+    return o.length ? `[${o.join(', ')}] ` : ''; };
   $('logDlg').addEventListener('close', () => {
     if ($('logDlg').returnValue !== 'save' || !pendingPos) return;
     const logs = store.get(LOGS, []);
     logs.push({id: newId(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
-               count: Math.max(0, parseInt($('count').value, 10) || 0), note: $('note').value.trim().slice(0, 120), exact: !!last, synced: false});
+               count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: !!last, synced: false});
     store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
     toast(store.get(CODE, '') ? 'Saved – sending when there is signal' : 'Saved on this phone (set a logging code to send it)');
     sendPending();
@@ -221,7 +243,7 @@
   $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
 
   $('sendLogs').addEventListener('click', async () => {
-    const logs = store.get(LOGS, []); if (!logs.length) return toast('No releases logged yet');
+    const logs = store.get(LOGS, []); if (!logs.length) return toast('No logs yet');
     const text = 'Strike grid logs\n' + logs.map(l => `${l.time} | ${l.species} x${l.count} | ${l.lat}, ${l.lon}${l.exact ? '' : ' (map centre)'}${l.note ? ' | ' + l.note : ''}`).join('\n');
     try { if (navigator.share) { await navigator.share({title: 'Strike grid logs', text}); return; } } catch (e) { if (e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
@@ -229,7 +251,7 @@
 
   $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); renderTimes(); renderConf(); renderPlan(); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
 
-  // ---------- birds / bait / weed sightings (logged like releases, short-lived on the map)
+  // ---------- birds / bait / weed sightings (logged like strikes, short-lived on the map)
   const sightLayer = L.layerGroup().addTo(map);
   async function drawSightings() {
     sightLayer.clearLayers();

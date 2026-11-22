@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=16">
+<link rel="stylesheet" href="app.css?v=17">
 </head>
 <body>
 <header class="top">
@@ -46,7 +46,7 @@
 <nav class="actions">
   <button id="boatBtn" class="primary">My boat</button>
   <button id="followBtn" disabled aria-pressed="false">Follow</button>
-  <button id="logBtn">Release</button>
+  <button id="logBtn">Strike</button>
   <button id="seenBtn">Birds/bait</button>
   <button id="moreBtn" aria-expanded="false">More</button>
 </nav>
@@ -87,10 +87,10 @@
   <p>Each square is about half a mile across. The darker the square, the more of the things marlin like come together there:
   the drop-off, the line where green water meets blue, temperature breaks and cooler water edges, bait, current lines, and recent catches.
   <b>It's a guide to where to start looking, not a promise of fish.</b></p>
-  <p>Red dots are the banks: tap one for wind, sea and current. Numbered circles are the best spots in each area. Stars are recent releases. Tap a square to see what it has going for it.</p>
+  <p>Red dots are the banks: tap one for wind, sea and current. Numbered circles are the best spots in each area. Stars are strikes: green today, blue earlier. Tap a square to see what it has going for it.</p>
   <p id="sources" class="small"></p>
   <p class="small">Experimental. Positions are approximate, so always navigate with your chart and chartplotter.
-  Your boat position stays on your phone. Only the releases you log are sent, to your own private sheet, and only after you enter a logging code.</p>
+  Your boat position stays on your phone. Only the strikes and sightings you log are sent, to your own private sheet, and only after you enter a logging code.</p>
 </div>
 
 <dialog id="seenDlg">
@@ -108,11 +108,16 @@
 
 <dialog id="logDlg">
   <form method="dialog" id="logForm">
-    <h2>Log a release</h2>
+    <h2>Log a strike</h2>
     <p id="logWhere" class="small">Uses your boat position.</p>
     <label>Species
       <select id="species"><option>Blue marlin</option><option>White marlin</option><option>Sailfish</option><option>Wahoo</option><option>Dolphin (mahi)</option><option>Tuna</option><option>No strikes here</option><option>Other</option></select>
     </label>
+    <fieldset class="outcome"><legend>What happened</legend>
+      <label><input type="checkbox" id="oStrike" checked> Strike</label>
+      <label><input type="checkbox" id="oLanded"> Landed</label>
+      <label><input type="checkbox" id="oReleased"> Released</label>
+    </fieldset>
     <label>How many <input id="count" type="number" min="0" max="50" value="1" inputmode="numeric"></label>
     <label>Note <input id="note" type="text" maxlength="120" placeholder="optional"></label>
     <div class="dlgBtns"><button value="cancel" formnovalidate>Cancel</button><button value="save" class="primary">Save</button></div>
@@ -121,6 +126,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=25"></script>
 </body>
 </html>
