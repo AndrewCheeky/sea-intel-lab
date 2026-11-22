@@ -599,7 +599,8 @@ def read_weed(depth):
     from scipy.ndimage import gaussian_filter, label
     date, lat, lon, a = afai('noaa_aoml_atlantic_oceanwatch_AFAI_3D')
     LA, LO, ok = water_mask(lat, lon, depth)
-    valid = np.isfinite(a) & ok
+    from scipy.ndimage import binary_erosion
+    valid = binary_erosion(np.isfinite(a), iterations=2) & ok     # cloud edges look like weed, so stay 2 pixels clear of them
     w = gaussian_filter(valid.astype(float), 6); bg = gaussian_filter(np.where(valid, a, 0), 6) / np.maximum(w, 1e-6)
     d = np.where(valid, a - bg, np.nan)
     hit = np.nan_to_num(d) > WEED_MIN
@@ -611,7 +612,9 @@ def read_weed(depth):
         pts.append(dict(lat=round(float(LA[ii, jj].mean()), 4), lon=round(float(LO[ii, jj].mean()), 4), size=int(len(ii)),
                         strength=round(float(np.nanmax(d[ii, jj]) / WEED_MIN), 1)))
     pts.sort(key=lambda p: -p['size'] * p['strength'])
-    log(f'weed: {date} {int(valid.sum())} clear water pixels, {n} patches, {len(pts)} kept, d99={np.nanpercentile(d, 99):.5f}')
+    pc = {q: round(float(np.nanpercentile(d, q)), 5) for q in (50, 90, 99, 99.5, 99.9)}
+    log(f'weed: {date} {int(valid.sum())} clear water pixels, {n} patches, {len(pts)} kept, spread {pc}, raw {[round(float(np.nanpercentile(a[valid], q)), 5) for q in (50, 99)]}')
+    log('weed biggest:', pts[:8])
     return {'date': date, 'patches': pts[:200]}
 
 
@@ -638,8 +641,8 @@ def confidence(chl_meta, clear, have_sst, logs):
     for reg in REGIONS:
         pts, why = 3, []
         if age is None: pts -= 2; why.append('Water colour data is missing')
-        elif age >= 4: pts -= 2; why.append(f'Water colour data is {age} days old')
-        elif age >= 2: pts -= 1; why.append(f'Water colour data is {age} days old')
+        elif age >= 5: pts -= 2; why.append(f'Water colour data is {age} days old')
+        elif age >= 3: pts -= 1; why.append(f'Water colour data is {age} days old')
         if chl_meta.get('status') == 'previous_observation': pts -= 1; why.append('The colour map was not refreshed this time')
         c = clear.get(reg)
         if c is not None:
@@ -649,7 +652,7 @@ def confidence(chl_meta, clear, have_sst, logs):
         if not have_sst: pts -= 1; why.append('Water temperature is missing this update')
         recent = [r for r in logs if region_of(r['lat'], r['lon']) == reg and 0 <= (now - r['when']).total_seconds() < 24 * 3600 and r['species'] != 'No strikes here']
         if recent: pts += 1; why.append('Boats reported fish or bait here in the last day')
-        if age is not None and age < 2 and not any('missing' in w or 'Cloud' in w for w in why): why.insert(0, 'Fresh water colour data')
+        if age is not None and age < 3 and not any('missing' in w or 'Cloud' in w for w in why): why.insert(0, 'Fresh water colour data')
         out[reg] = {'level': 'Good' if pts >= 3 else 'Fair' if pts == 2 else 'Poor', 'why': why}
     return out
 
