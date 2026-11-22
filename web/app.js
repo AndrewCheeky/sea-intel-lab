@@ -129,6 +129,9 @@
   const DELS = 'sil.deletes', HIDDEN = 'sil.hidden';
   // Each log belongs to the boat code it was made under; a phone only shows / sends / deletes that boat's logs.
   const curCode = () => String(store.get(CODE, '') || '').toUpperCase();
+  const devId = (() => { let d = store.get('sil.dev', ''); if (!d) { d = newId(); store.set('sil.dev', d); } return d; })();
+  const capCode = () => (store.get('sil.caps', {})[curCode()] || '');
+  const setCap = (code, cap) => { const c = store.get('sil.caps', {}); if (cap) c[code] = cap; else delete c[code]; store.set('sil.caps', c); };
   const boatLogs = () => store.get(LOGS, []).filter(l => l.code && l.code === curCode());
   (function tagOldLogs() {                       // logs saved before boat tagging: give them to the code on the phone now
     if (store.get('sil.tagged1', false)) return;
@@ -138,6 +141,14 @@
   })();
   const logKey = (time, lat) => `${String(time).slice(0, 16)}|${Number(lat).toFixed(3)}`;
   const delBtn = l => `<br><button class="delLog" data-id="${esc(l.id || '')}" data-time="${esc(l.time)}">Delete this log</button>`;
+  function deleteTeamLog(id) {
+    const t = store.get('sil.team', null), r = t && t.logs.find(x => x.id === id); if (!r) return;
+    if (!confirm(`Delete the crew's "${r.species}" log from ${new Date(r.date).toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'})}?`)) return;
+    t.logs = t.logs.filter(x => x.id !== id); store.set('sil.team', t);
+    const hidden = store.get(HIDDEN, []); hidden.push('id:' + id); store.set(HIDDEN, hidden.slice(-300));
+    const d = store.get(DELS, []).filter(x => typeof x === 'object'); d.push({id, code: curCode()}); store.set(DELS, d);
+    map.closePopup(); drawMyLogs(); drawSightings(); toast('Log deleted'); sendPending();
+  }
   function deleteLog(id, time) {
     const all = store.get(LOGS, []), l = all.find(x => x.code === curCode() && ((id && x.id === id) || x.time === time)); if (!l) return;
     if (!confirm(`Delete "${l.species}" logged ${new Date(l.time).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}?`)) return;
@@ -146,7 +157,7 @@
     if (l.synced && l.id) { const d = store.get(DELS, []).filter(x => typeof x === 'object'); if (!d.some(x => x.id === l.id)) d.push({id: l.id, code: l.code}); store.set(DELS, d); }
     map.closePopup(); drawMyLogs(); drawSightings(); toast('Log deleted'); sendPending();
   }
-  map.on('popupopen', e => { const b = e.popup.getElement().querySelector('.delLog'); if (b) b.addEventListener('click', () => deleteLog(b.dataset.id, b.dataset.time)); });
+  map.on('popupopen', e => { const b = e.popup.getElement().querySelector('.delLog'); if (b) b.addEventListener('click', () => b.dataset.team ? deleteTeamLog(b.dataset.id) : deleteLog(b.dataset.id, b.dataset.time)); });
 
   // Strikes: green star = today, blue star = earlier. Your own logs (with Delete) plus everyone's from the last build.
   const star = (fill, size = 22) => L.divIcon({className: '', iconSize: [size, size], iconAnchor: [size / 2, size / 2],
@@ -159,7 +170,7 @@
   async function loadTeam() {
     const code = curCode(); if (!code || !navigator.onLine) return;
     try {
-      const j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'team', code})}`, {cache: 'no-store'})).json();
+      const j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'team', code, cap: capCode()})}`, {cache: 'no-store'})).json();
       if (j && j.ok && Array.isArray(j.logs)) { store.set('sil.team', {code, logs: j.logs}); if (j.share) store.set('sil.share', j.share); drawMyLogs(); drawSightings(); }
     } catch {}
   }
@@ -183,7 +194,8 @@
       mineIds.add(r.id); mineKeys.add(logKey(r.date, r.lat));
       L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 680})
         .bindPopup(`<b>${esc(r.species)}${r.count > 1 ? ' × ' + r.count : ''}</b>${outcomeOf(r.note) ? ' · ' + esc(outcomeOf(r.note)) : ''}<br>${esc(boatName)} <small>(crew)</small><br>` +
-          `${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(r.lat, r.lon)}${noteText(r.note) ? '<br>' + esc(noteText(r.note)) : ''}`).addTo(myLayer);
+          `${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(r.lat, r.lon)}${noteText(r.note) ? '<br>' + esc(noteText(r.note)) : ''}` +
+          (capCode() ? `<br><button class="delLog" data-team="1" data-id="${esc(r.id)}">Delete (captain)</button>` : '')).addTo(myLayer);
     }
     for (const r of pubStrikes) {
       const k = logKey(r.date, r.lat); if (mineKeys.has(k) || hidden.has(k) || (r.id && (mineIds.has(r.id) || hidden.has('id:' + r.id)))) continue;
@@ -193,7 +205,7 @@
     const waiting = logs.filter(l => !l.synced).length;   // logs = this boat's only
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
     $('codeState').textContent = store.get(CODE, '') ? (store.get('sil.boat', '') || 'set') : 'not set';
-    $('shareState').textContent = SHARE_TXT[store.get('sil.share', '') || 'research'];
+    $('shareState').textContent = SHARE_TXT[store.get('sil.share', '') || 'research'] + (store.get(CODE, '') && !capCode() ? ' (set by captain)' : '');
   }
   let pendingPos = null;
   function needCode() {
@@ -230,13 +242,13 @@
     try {
       for (const d of store.get(DELS, []).filter(x => typeof x === 'object' && x.code)) {
         let j = null;
-        try { const r = await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', del: '1', code: d.code, id: d.id})}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }
+        try { const r = await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', del: '1', code: d.code, id: d.id, dev: devId, cap: (store.get('sil.caps', {})[d.code] || '')})}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }
         if (j && (j.ok || /not your log|code/.test(j.error || ''))) store.set(DELS, store.get(DELS, []).filter(x => !(typeof x === 'object' && x.id === d.id)));
         else break;
       }
       for (const l of store.get(LOGS, []).filter(x => !x.synced && x.code)) {
         if (!l.id) l.id = newId();
-        const q = new URLSearchParams({action: 'strikelog', code: l.code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0'});
+        const q = new URLSearchParams({action: 'strikelog', code: l.code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0', dev: devId});
         let j = null;
         try { const r = await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }       // no signal: try later
         const current = l.code === curCode();
@@ -250,31 +262,38 @@
   window.addEventListener('online', sendPending);
   setInterval(sendPending, 120000);
   // ---------- boat code and sharing (per boat: research only / general area / everything)
-  const SHARE_TXT = {research: 'Research (crew only)', bank: 'Tournament Mode', all: 'Everything'};
+  const SHARE_TXT = {research: 'Research (private)', crew: 'Crew', bank: 'Tournament Mode', all: 'Everything'};
   async function shareCall(level) {
     const code = store.get(CODE, ''); if (!code) return null;
-    const q = new URLSearchParams({action: 'strikelog', op: 'share', code}); if (level) q.set('level', level);
+    const q = new URLSearchParams({action: 'strikelog', op: 'share', code, cap: capCode()}); if (level) q.set('level', level);
     try { const j = await (await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'})).json(); if (j && j.ok) { store.set('sil.boat', j.boat || ''); store.set('sil.share', j.share || ''); drawMyLogs(); } return j; }
     catch { return null; }
   }
   function askSharing() {
     $('shareBoat').textContent = store.get('sil.boat', '') ? `for ${store.get('sil.boat', '')}` : '';
-    const cur = store.get('sil.share', '') || 'research'; document.querySelectorAll('#shareDlg [value]').forEach(b => b.classList.toggle('chosen', b.value === cur));
+    const cur = store.get('sil.share', '') || 'research', isCap = !!capCode();
+    document.querySelectorAll('#shareDlg .shareOpts [value]').forEach(b => { b.classList.toggle('chosen', b.value === cur); b.disabled = !isCap && b.value !== cur; });
+    $('capNote').hidden = isCap;
     $('shareDlg').showModal();
   }
   $('shareDlg').addEventListener('close', async () => {
     const v = $('shareDlg').returnValue; if (!SHARE_TXT[v]) return;
+    if (!capCode()) return toast('Only the captain can change sharing');
+    if (v === (store.get('sil.share', '') || 'research')) return;
     if (!store.get(CODE, '')) return toast('Enter your boat code first');
     const j = await shareCall(v);
+    if (j && j.ok) loadTeam();
     toast(j && j.ok && j.share ? `Sharing: ${SHARE_TXT[j.share]} – applies to every phone on ${j.boat || 'your boat'}`
       : j && (j.ok || /position|count/.test(j.error || '')) ? 'Not saved yet – the logging script needs updating (StrikeLog.gs)'
+      : j && /captain/.test(j.error || '') ? 'Only the captain can change sharing'
       : j && /code/.test(j.error || '') ? 'Not saved – boat code not accepted'
       : j ? 'Not saved: ' + (j.error || 'unknown') : 'Not saved – no signal, try again when connected');
   });
   $('shareBtn').addEventListener('click', () => askSharing());
   function openCode() {
     $('codeIn').value = store.get(CODE, ''); $('boatIn').value = ''; $('byIn').value = ''; $('newCode').hidden = true; $('dupMsg').hidden = true;
-    $('codeNow').textContent = store.get(CODE, '') ? `This phone uses ${store.get('sil.boat', '') || 'a boat code'} (${store.get(CODE, '')}).` : 'No boat code on this phone yet.';
+    $('codeNow').textContent = store.get(CODE, '') ? `This phone uses ${store.get('sil.boat', '') || 'a boat code'} (${store.get(CODE, '')})${capCode() ? ' as captain' : ''}.` : 'No boat code on this phone yet.';
+    $('capRow').hidden = !store.get(CODE, '') || !!capCode();
     $('codeDlg').showModal();
   }
   $('codeBtn').addEventListener('click', openCode);
@@ -298,15 +317,23 @@
     if (j.duplicate) { $('dupMsg').textContent = j.error; $('dupMsg').hidden = false; return; }
     if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Creating codes needs the updated logging script (StrikeLog.gs)' : 'Not created: ' + (j.error || 'unknown'));
     $('dupMsg').hidden = true;
-    $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCode').hidden = false;
+    $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCapTxt').textContent = j.cap || '–'; $('newCode').hidden = false;
+    if (j.cap) setCap(j.code.toUpperCase(), j.cap);
     store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', j.share || 'research'); drawMyLogs(); drawSightings();
   });
   $('shareCodeBtn').addEventListener('click', async () => {
-    const text = `Boat code for ${$('newBoatTxt').textContent} on the Marlin strike grid: ${$('newCodeTxt').textContent}\n${location.origin + location.pathname}\n(Open it, More → Boat code → Join)`;
+    const text = `Boat code for ${$('newBoatTxt').textContent} on the Marlin strike grid: ${$('newCodeTxt').textContent}\n${location.origin + location.pathname}\n(Open it, More → Boat code → Join)`;   // crew code only – the captain code stays private
     try { if (navigator.share) await navigator.share({text}); else { await navigator.clipboard.writeText(text); toast('Copied – paste it to your crew'); } } catch {}
   });
   $('codeDoneBtn').addEventListener('click', () => { $('codeDlg').close(); });
-  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); drawSightings(); $('codeDlg').close(); });;
+  $('capBtn').addEventListener('click', async () => {
+    const cap = $('capIn').value.trim().toUpperCase(); if (!curCode()) return toast('Join your boat first'); if (!cap) return toast('Type the captain code');
+    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'captain', code: curCode(), cap})}`, {cache: 'no-store'})).json(); } catch {}
+    if (!j) return toast('No signal – try again when connected');
+    if (!j.captain) return toast('That captain code is not right for this boat');
+    setCap(curCode(), cap); $('capIn').value = ''; toast(`Captain controls on for ${j.boat}`); drawMyLogs(); drawSightings(); openCode();
+  });
+  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; setCap(curCode(), ''); store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); drawSightings(); $('codeDlg').close(); });;
 
   // ---------- track record
   async function loadTrack() {
@@ -346,7 +373,7 @@
     sightLayer.clearLayers();
     let list = []; try { list = await getJSON('sightings.json'); } catch {}
     const mine = boatLogs().filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l, id: l.id}));
-    const team = teamLogs().filter(r => SIGHT.includes(r.species) && !mine.some(m => m.id === r.id)).map(r => ({date: r.date, lat: r.lat, lon: r.lon, what: r.species, id: r.id, boat: (store.get('sil.boat', '') || 'your boat') + ' (crew)'}));
+    const team = teamLogs().filter(r => SIGHT.includes(r.species) && !mine.some(m => m.id === r.id)).map(r => ({date: r.date, lat: r.lat, lon: r.lon, what: r.species, id: r.id, crew: true, boat: (store.get('sil.boat', '') || 'your boat') + ' (crew)'}));
     mine.push(...team);
     const mineIds = new Set(mine.map(m => m.id).filter(Boolean));
     const seen = new Set(store.get(HIDDEN, []).map(k => k));
@@ -356,7 +383,7 @@
       if (age > 24 || age < -1 || seen.has(k)) continue; seen.add(k);
       L.marker([s.lat, s.lon], {zIndexOffset: 600, icon: L.divIcon({className: 'seen', iconSize: [24, 24], iconAnchor: [12, 12],
         html: `<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="opacity:${Math.max(.35, 1 - age / 24)}"><circle cx="12" cy="12" r="10" fill="#7CFC9A" stroke="#061b33" stroke-width="2"/><path d="M6 13c2-2 4-2 6 0 2-2 4-2 6 0" fill="none" stroke="#061b33" stroke-width="2" stroke-linecap="round"/></svg>`})})
-        .bindPopup(`<b>${esc(s.what)}</b>${s.boat ? `<br>${esc(s.boat)}` : s.own && store.get('sil.boat', '') ? `<br>${esc(store.get('sil.boat', ''))}` : ''}<br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${s.bank ? `Near ${esc(s.bank)} <small>(general area only)</small>` : pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : ''}`).addTo(sightLayer);
+        .bindPopup(`<b>${esc(s.what)}</b>${s.boat ? `<br>${esc(s.boat)}` : s.own && store.get('sil.boat', '') ? `<br>${esc(store.get('sil.boat', ''))}` : ''}<br>${age < 1 ? 'Under an hour ago' : Math.round(age) + ' h ago'}<br>${s.bank ? `Near ${esc(s.bank)} <small>(general area only)</small>` : pos2txt(s.lat, s.lon)}${s.own ? delBtn(s.own) : s.crew && capCode() ? `<br><button class="delLog" data-team="1" data-id="${esc(s.id)}">Delete (captain)</button>` : ''}`).addTo(sightLayer);
     }
   }
   const SIGHT = ['Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'];
