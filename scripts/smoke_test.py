@@ -56,7 +56,7 @@ async def main():
             deleted = other_hidden and await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').filter(l => l.code === 'SMOKE-TEST').length === 0 && [...document.querySelectorAll('path')].filter(p => p.getAttribute('fill') === '#2ee66b').length === 0")
         print('delete a log:', deleted)
         await pg.evaluate("document.getElementById('shareBtn').click()"); await pg.wait_for_timeout(300)
-        share_open = await pg.evaluate("document.getElementById('shareDlg').open && document.querySelectorAll('#shareDlg .shareOpts button').length === 3")
+        share_open = await pg.evaluate("document.getElementById('shareDlg').open && document.querySelectorAll('#shareDlg .shareOpts button').length === 4 && !document.getElementById('capNote').hidden")
         await pg.evaluate("document.getElementById('shareDlg').close('cancel')")
         print('sharing dialog:', share_open)
         await pg.evaluate("localStorage.setItem('sil.code', '\"\"')")
