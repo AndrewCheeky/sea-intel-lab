@@ -49,7 +49,6 @@ dialog input,dialog select{display:block;width:100%;margin-top:4px;min-height:44
 .chips{display:flex;gap:6px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none;padding:2px 0}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;border:1px solid var(--line);border-radius:999px;padding:5px 10px;font:600 12.5px/1.2 inherit;background:#12345a;color:var(--ink);white-space:nowrap}
-.tbank{min-height:32px;max-width:46vw;border:1px solid var(--line);border-radius:9px;background:#12345a;color:var(--ink);font:600 12.5px inherit;padding:0 6px}
 .chip.major{border-color:#7ad7c2}
 .chip.minor{border-style:dashed;border-color:#7ad7c2}
 .chip.prime{background:#ffd166;color:#3d2c00;border-color:#ffd166}
