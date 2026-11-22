@@ -41,7 +41,8 @@
     meta = m; area = grid.area; cellDeg = grid.cell;
     const built = new Date(m.built_utc);
     $('built').textContent = `Built ${built.toLocaleString([], {weekday: 'short', hour: 'numeric', minute: '2-digit'})}` +
-      (m.sea_date ? ` · sea data from ${new Date(m.sea_date + 'T12:00:00').toLocaleDateString([], {month: 'short', day: 'numeric'})}` : '') +
+      // Water colour is normally up to 2 days behind; that still counts as current
+      (m.sea_date ? ((Date.now() - Date.parse(m.sea_date + 'T12:00:00Z')) / 864e5 <= 2.6 ? ' · sea data current' : ' · awaiting fresh sea data') : '') +
       (Date.now() - built > 18 * 3600e3 ? ' · may be out of date' : '');
     $('sources').textContent = `Updated with the latest sea conditions${m.releases_used ? ` and ${m.releases_used} recent release${m.releases_used === 1 ? '' : 's'}` : ''}.`;
 
