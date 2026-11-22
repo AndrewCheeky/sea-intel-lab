@@ -45,10 +45,10 @@
     const canvas = L.canvas({padding: .3});
     const n = v => v < 0 ? null : v / 10;
     for (const r of grid.rows) {
-      const [i, j, s1000, depth, drop, front, zoo, conv, rel] = r, score = s1000 / 1000;
+      const [i, j, s1000, depth, drop, front, zoo, conv, rel, temp = -1, cool = 0] = r, score = s1000 / 1000;
       const la = area.south + (i + .5) * cellDeg, lo = area.west + (j + .5) * cellDeg;
       const p = {score, cls: CLASSES.find(c => score >= c[0])[1], lat: la, lon: lo, depth_m: depth < 0 ? null : depth, drop: drop / 100,
-                 front_nm: n(front), zoo_nm: n(zoo), conv_nm: n(conv), release_nm: n(rel)};
+                 front_nm: n(front), zoo_nm: n(zoo), conv_nm: n(conv), release_nm: n(rel), temp_nm: n(temp), cool: cool / 100};
       cells.set(`${i}|${j}`, p); if (score >= .77) hot.push(p);
       L.rectangle([[la - cellDeg / 2, lo - cellDeg / 2], [la + cellDeg / 2, lo + cellDeg / 2]],
         {renderer: canvas, stroke: false, fillColor: COLORS[p.cls], fillOpacity: OPAC[p.cls]}).on('click', ev => L.popup().setLatLng(ev.latlng).setContent(explain(p)).openOn(map)).addTo(sea);
@@ -66,6 +66,8 @@
     const r = [], near = (v, d) => v != null && v <= d;
     if (p.drop >= .6) r.push('On the drop-off'); else if (p.drop >= .3) r.push('Near the drop-off');
     if (near(p.front_nm, 1.5)) r.push('Green-to-blue water line close by'); else if (near(p.front_nm, 3)) r.push('Green-to-blue water line nearby');
+    if (near(p.temp_nm, 1.5)) r.push('Temperature break close by'); else if (near(p.temp_nm, 3)) r.push('Temperature break nearby');
+    if (p.cool >= .4) r.push('Cooler water edge');
     if (near(p.zoo_nm, 2.5)) r.push('Bait likely nearby');
     if (near(p.conv_nm, 3)) r.push('Current line nearby');
     if (near(p.release_nm, 3)) r.push('Recent catch nearby');

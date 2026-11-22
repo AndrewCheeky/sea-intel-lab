@@ -25,8 +25,11 @@ BASE = os.getenv('SOURCE_SITE', 'https://andrewcheeky.github.io/jamaica-marine-c
 # Area scored (south coast around Kingston); cell size in degrees (~0.6 NM)
 AREA = dict(west=-79.50, east=-74.50, south=16.00, north=20.00)   # same area as the Fishing Intelligence map
 CELL = 0.01
-WEIGHTS = dict(drop=.30, front=.30, release=.20, zoo=.15, conv=.05)
-SIGMA_NM = dict(drop=2.0, front=2.5, release=3.0, zoo=2.5, conv=3.0)
+WEIGHTS = dict(drop=.27, front=.27, release=.18, zoo=.12, temp=.12, conv=.04)
+SIGMA_NM = dict(drop=2.0, front=2.5, release=3.0, zoo=2.5, conv=3.0, temp=3.0)
+ALIGN_BONUS = .06      # a temperature break lining up with the drop-off or the colour change
+COOL_BONUS = .04       # the cooler side of a break (water a little cooler than around it)
+COMFORT_C = (23.0, 30.5)   # outside this, scores are lowered
 COS = math.cos(math.radians(17.7))
 # Map image layout of chlorophyll-latest.png (fixed by the source site's composite.py)
 MAP_EXTENT = (-79.5, -74.5, 16.0, 20.0)
@@ -114,14 +117,48 @@ def read_map_layers():
     return to_ll(white), to_ll(pink)
 
 
-def read_convergence():
+def read_feature_lines():
+    """Current lines and temperature breaks published by the source site (ocean-features.geojson)."""
     gj = json.loads(fetch(BASE + 'ocean-features.geojson'))
-    lines = []
+    out = {'convergence': [], 'sst_front': []}
     for f in gj.get('features', []):
         p, g = f.get('properties', {}), f.get('geometry', {})
-        if p.get('kind') == 'convergence' and g.get('type') == 'LineString':
-            lines.append([(c[1], c[0]) for c in g['coordinates']])
-    return lines, gj.get('properties', {})
+        if p.get('kind') in out and g.get('type') == 'LineString':
+            out[p['kind']].append([(c[1], c[0]) for c in g['coordinates']])
+    return out, gj.get('properties', {})
+
+
+def read_sst():
+    """Sea surface temperature now (Open-Meteo marine), on a 0.1° grid near the banks, smoothed onto the score grid.
+    Returns (sst °C, anomaly °C = this square minus its surroundings; negative = cooler water)."""
+    from scipy.ndimage import gaussian_filter, distance_transform_edt
+    from scipy.interpolate import RegularGridInterpolator
+    clat = np.round(np.arange(AREA['south'], AREA['north'] + .001, .1), 2); clon = np.round(np.arange(AREA['west'], AREA['east'] + .001, .1), 2)
+    CL, CO = np.meshgrid(clat, clon, indexing='ij')
+    want = np.ones(CL.shape, bool)
+    if BANKS:
+        want = np.zeros(CL.shape, bool)
+        for b in BANKS: want |= nm_between(CL, CO, b['lat'], b['lon']) < BANK_REACH_NM + 8
+    idx = np.argwhere(want)
+    vals = np.full(CL.shape, np.nan)
+    hour = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:00')
+    for k in range(0, len(idx), 150):
+        chunk = idx[k:k + 150]
+        q = urllib.parse.urlencode({'latitude': ','.join(f'{CL[i, j]:.2f}' for i, j in chunk), 'longitude': ','.join(f'{CO[i, j]:.2f}' for i, j in chunk),
+                                    'hourly': 'sea_surface_temperature', 'timezone': 'GMT', 'forecast_days': 1, 'cell_selection': 'sea'})
+        res = json.loads(fetch('https://marine-api.open-meteo.com/v1/marine?' + q, timeout=90))
+        res = res if isinstance(res, list) else [res]
+        for (i, j), r in zip(chunk, res):
+            h = r.get('hourly', {}); t = h.get('time', []); v = h.get('sea_surface_temperature', [])
+            if not t: continue
+            n = t.index(hour) if hour in t else min(len(v) - 1, int(datetime.now(timezone.utc).hour))
+            if v and v[n] is not None: vals[i, j] = float(v[n])
+    if np.isnan(vals).all(): raise ValueError('no sea temperature returned')
+    holes = np.isnan(vals)                               # fill gaps (land, far water) with the nearest value
+    _, (ii, jj) = distance_transform_edt(holes, return_indices=True); filled = vals[ii, jj]
+    fine = RegularGridInterpolator((clat, clon), filled, bounds_error=False, fill_value=None)(np.c_[GLAT.ravel(), GLON.ravel()]).reshape(GLAT.shape)
+    anomaly = fine - gaussian_filter(fine, 20)           # vs the water ~12 NM around
+    return fine, anomaly
 
 
 def read_depth():
@@ -297,10 +334,16 @@ def main():
     d_front, d_zoo = dist_to_points(white), dist_to_points(pink)
     # convergence
     try:
-        conv, feat_props = read_convergence(); sources['convergence'] = 'ocean-features.geojson'
+        lines, feat_props = read_feature_lines(); conv, breaks = lines['convergence'], lines['sst_front']
+        sources['convergence'] = f'{len(conv)} lines'; sources['temperature breaks'] = f'{len(breaks)} lines'
     except Exception as e:
-        log('features unavailable:', e); conv, feat_props = [], {}; sources['convergence'] = 'unavailable'
+        log('features unavailable:', e); conv, breaks, feat_props = [], [], {}; sources['convergence'] = 'unavailable'
     d_conv = dist_to_lines(conv) if conv else np.full(GLAT.shape, 999.0)
+    d_temp = dist_to_lines(breaks) if breaks else np.full(GLAT.shape, 999.0)
+    try:
+        sst, sst_anom = read_sst(); sources['sea temperature'] = 'Open-Meteo marine'
+    except Exception as e:
+        log('sea temperature unavailable:', e); sst = sst_anom = None
     # depth / drop-off
     depth = None
     try:
@@ -332,11 +375,19 @@ def main():
         s_rel = np.maximum(s_rel, r['weight'] * gauss(d, SIGMA_NM['release']))
 
     s = dict(drop=s_drop, front=gauss(d_front, SIGMA_NM['front']), zoo=gauss(d_zoo, SIGMA_NM['zoo']),
-             conv=gauss(d_conv, SIGMA_NM['conv']), release=s_rel)
+             conv=gauss(d_conv, SIGMA_NM['conv']), release=s_rel, temp=gauss(d_temp, SIGMA_NM['temp']))
     used = {k: v for k, v in WEIGHTS.items() if not (k == 'front' and white is None) and not (k == 'zoo' and pink is None)
-            and not (k == 'conv' and not conv) and not (k == 'release' and not rel)}
+            and not (k == 'conv' and not conv) and not (k == 'release' and not rel) and not (k == 'temp' and not breaks)}
     tot = sum(used.values())
     score = sum(used[k] / tot * s[k] for k in used)
+    if breaks:                                              # break lining up with the drop-off or the colour change
+        score = score + ALIGN_BONUS * s['temp'] * np.maximum(s['drop'], s['front'])
+    cool = np.zeros(GLAT.shape)
+    if sst_anom is not None:                                # cooler side of a break, within comfortable water
+        cool = np.clip(-sst_anom / .4, 0, 1) * np.maximum(s['temp'], .35 * s['front'])
+        score = score + COOL_BONUS * cool
+        lo, hi = COMFORT_C
+        score = score * np.where((sst < lo) | (sst > hi), .7, 1.0)
 
     # no score on land or within 0.5 NM of it
     land = np.zeros(GLAT.shape, bool)
@@ -373,7 +424,8 @@ def main():
             if rel: why['release_nm'] = round(float(d_rel[i, j]), 1)
             rows.append([int(i), int(j), int(round(v * 1000)), int(round(float(depth[i, j]))) if depth is not None else -1, int(round(float(s_drop[i, j]) * 100)),
                          q10(d_front[i, j]) if white is not None else -1, q10(d_zoo[i, j]) if pink is not None else -1,
-                         q10(d_conv[i, j]) if conv else -1, q10(d_rel[i, j]) if rel else -1])
+                         q10(d_conv[i, j]) if conv else -1, q10(d_rel[i, j]) if rel else -1,
+                         q10(d_temp[i, j]) if breaks else -1, int(round(float(cool[i, j]) * 100))])
             if v < .62: continue                     # the KML keeps Good and better only (file size)
             feats.append({'type': 'Feature', 'properties': dict(score=round(v, 3), cls=cls, lat=la, lon=lo, **why),
                           'geometry': {'type': 'Polygon', 'coordinates': [[[round(lo - h, 5), round(la - h, 5)], [round(lo + h, 5), round(la - h, 5)],
