@@ -262,9 +262,8 @@
     }
     for (const it of items) if (it.kind === 'tide' || it.kind === 'current') it.prime = [...win, ...sol].some(w => it.at >= w.start && it.at <= w.end);
     items.sort((a, b) => a.start - b.start);
-    // Compact by default: what's on now, the next thing coming, and anything Prime still ahead. The rest behind "+N more".
-    const ahead = items.filter(it => it.end >= now), nextUp = ahead.find(it => it.start > now);
-    const show = items.map(it => showAllTimes || (it.end >= now && (it.prime || (now >= it.start && now <= it.end) || it === nextUp)));
+    // Compact by default: only the major and minor feeding periods on now or still to come. Everything else behind "+N more".
+    const show = items.map(it => showAllTimes || ((it.kind === 'major' || it.kind === 'minor') && it.end >= now));
     const hidden = show.filter(v => !v).length;
     $('chips').innerHTML = items.map((it, k) => {
       if (!show[k]) return '';
