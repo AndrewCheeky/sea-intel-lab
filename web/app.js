@@ -188,20 +188,42 @@
   $('areaSel').addEventListener('change', e => { store.set('sil.view', e.target.value); follow = false; $('followBtn').setAttribute('aria-pressed', false); map.fitBounds(VIEWS[e.target.value]); });
 
   // ---------- depth contours (on/off, remembered)
-  const DEPTH_COLORS = {100: '#9fe7ff', 200: '#5cc8ff', 500: '#2f9be0', 1000: '#2470c2', 2000: '#5a4fcf'};
-  let contourLayer = null;
+  const DEPTH_COLORS = {100: '#9fe7ff', 200: '#e0f7ff', 500: '#5cc8ff', 1000: '#3a8fe0', 2000: '#8a7dff'};
+  let contourLayer = null, contourData = null;
+  const labelLayer = L.layerGroup();
+  // Small depth labels along the lines, spaced by zoom and turned to follow the line (kept upright).
+  function drawDepthLabels() {
+    labelLayer.clearLayers();
+    if (!contourData || !map.hasLayer(contourLayer) || map.getZoom() < 8) return;
+    const spacingNm = 48 / Math.pow(2, map.getZoom() - 8), view = map.getBounds().pad(.2);
+    for (const f of contourData.features) {
+      const c = f.geometry.coordinates, d = f.properties.depth_m; let run = spacingNm / 2;
+      for (let k = 1; k < c.length; k++) {
+        const a = [c[k - 1][1], c[k - 1][0]], b = [c[k][1], c[k][0]];
+        run += nm(a, b);
+        if (run < spacingNm || !view.contains(b)) continue;
+        run = 0;
+        const pa = map.latLngToLayerPoint(a), pb = map.latLngToLayerPoint(b);
+        let ang = Math.atan2(pb.y - pa.y, pb.x - pa.x) * 180 / Math.PI; if (ang > 90) ang -= 180; if (ang < -90) ang += 180;
+        L.marker(b, {interactive: false, keyboard: false, icon: L.divIcon({className: 'dlabel', iconSize: [0, 0],
+          html: `<span style="transform:translate(-50%,-50%) rotate(${ang.toFixed(0)}deg);color:${DEPTH_COLORS[d] || '#cfefff'}">${d} m</span>`})}).addTo(labelLayer);
+      }
+    }
+  }
+  map.on('zoomend moveend', drawDepthLabels);
   async function showContours(on) {
     store.set('sil.contours', on);
-    if (!on) { if (contourLayer) { map.removeLayer(contourLayer); } return; }
+    if (!on) { if (contourLayer) { map.removeLayer(contourLayer); } map.removeLayer(labelLayer); return; }
     if (!contourLayer) {
       let gj; try { gj = await getJSON('contours.geojson'); } catch { toast('Depth contours not available yet'); $('contours').checked = false; return; }
       const levels = [...new Set(gj.features.map(f => f.properties.depth_m))].sort((a, b) => a - b);
+      contourData = gj;
       contourLayer = L.geoJSON(gj, {interactive: true,
-        style: f => ({color: DEPTH_COLORS[f.properties.depth_m] || '#5cc8ff', weight: f.properties.depth_m === 200 ? 1.8 : 1.2, opacity: .9, dashArray: f.properties.depth_m >= 1000 ? '5 4' : null}),
+        style: f => ({color: DEPTH_COLORS[f.properties.depth_m] || '#5cc8ff', weight: f.properties.depth_m === 200 ? 2.6 : 1.3, opacity: f.properties.depth_m === 200 ? 1 : .85, dashArray: f.properties.depth_m >= 1000 ? '5 4' : null}),
         onEachFeature: (f, l) => l.bindTooltip(`${f.properties.depth_m} m (${Math.round(f.properties.depth_m * 3.281)} ft)`, {sticky: true})});
       contourLayer.bindPopup(`Depth lines: ${levels.join(', ')} m<br><small>${esc((gj.properties || {}).source || '')} · approximate, not soundings</small>`);
     }
-    contourLayer.addTo(map);
+    contourLayer.addTo(map); labelLayer.addTo(map); drawDepthLabels();
   }
   $('contours').addEventListener('change', e => showContours(e.target.checked));
   if (store.get('sil.contours', false)) { $('contours').checked = true; showContours(true); }

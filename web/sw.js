@@ -1,6 +1,6 @@
 /* Keeps the strike grid usable offshore: the page and the latest grid are saved when opened with signal. */
-const CACHE = 'sil-v6';
-const SHELL = ['./', 'index.html', 'app.js?v=5', 'app.css?v=5', 'manifest.webmanifest',
+const CACHE = 'sil-v7';
+const SHELL = ['./', 'index.html', 'app.js?v=6', 'app.css?v=6', 'manifest.webmanifest',
   'vendor/leaflet/leaflet.css', 'vendor/leaflet/leaflet.js'];
 const DATA = ['grid.json', 'top-spots.json', 'releases.json', 'meta.json', 'coast.geojson', 'banks.json', 'strike-grid.kml', 'top-spots.gpx', 'track-record.json', 'contours.geojson'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled([...SHELL, ...DATA].map(u => c.add(u)))).then(() => self.skipWaiting())));
