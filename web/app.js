@@ -623,7 +623,18 @@
   $('infoBtn').addEventListener('click', () => sheet($('infoBtn'), $('info')));
   map.on('click', () => document.querySelectorAll('.sheet').forEach(s => s.hidden = true));
   $('tiles').addEventListener('change', e => {
-    if (e.target.checked) tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 15, attribution: '© OpenStreetMap'}).addTo(map).bringToBack();
+    if (e.target.checked) {
+      // CARTO street tiles (free for websites, no key); fall back to OpenStreetMap if they fail to load
+      const opts = {maxZoom: 15, referrerPolicy: 'strict-origin-when-cross-origin', crossOrigin: true};
+      let fails = 0;
+      tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        {...opts, subdomains: 'abcd', attribution: '© OpenStreetMap contributors © CARTO'}).addTo(map).bringToBack();
+      tiles.on('tileerror', () => {
+        if (++fails !== 6 || !tiles) return;
+        map.removeLayer(tiles);
+        tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {...opts, attribution: '© OpenStreetMap'}).addTo(map).bringToBack();
+      });
+    }
     else if (tiles) { map.removeLayer(tiles); tiles = null; }
     if (coastLayer) coastLayer.setStyle(tiles ? COAST_OVER_TILES : COAST_PLAIN);   // the detailed map shows the land itself
     store.set('sil.tiles', e.target.checked);
