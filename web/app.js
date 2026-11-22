@@ -127,14 +127,23 @@
   const myLayer = L.layerGroup().addTo(map);
   // ---------- delete one of your own logs (from the phone and, if already sent, from the sheet)
   const DELS = 'sil.deletes', HIDDEN = 'sil.hidden';
+  // Each log belongs to the boat code it was made under; a phone only shows / sends / deletes that boat's logs.
+  const curCode = () => String(store.get(CODE, '') || '').toUpperCase();
+  const boatLogs = () => store.get(LOGS, []).filter(l => l.code && l.code === curCode());
+  (function tagOldLogs() {                       // logs saved before boat tagging: give them to the code on the phone now
+    if (store.get('sil.tagged1', false)) return;
+    const c = curCode(), all = store.get(LOGS, []);
+    if (c) all.forEach(l => { if (!l.code) l.code = c; });
+    store.set(LOGS, all); store.set('sil.tagged1', true);   // untagged logs stay hidden if no code yet
+  })();
   const logKey = (time, lat) => `${String(time).slice(0, 16)}|${Number(lat).toFixed(3)}`;
   const delBtn = l => `<br><button class="delLog" data-id="${esc(l.id || '')}" data-time="${esc(l.time)}">Delete this log</button>`;
   function deleteLog(id, time) {
-    const all = store.get(LOGS, []), l = all.find(x => (id && x.id === id) || x.time === time); if (!l) return;
+    const all = store.get(LOGS, []), l = all.find(x => x.code === curCode() && ((id && x.id === id) || x.time === time)); if (!l) return;
     if (!confirm(`Delete "${l.species}" logged ${new Date(l.time).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}?`)) return;
     store.set(LOGS, all.filter(x => x !== l && !(x.id && x.id === l.id)));
     const hidden = store.get(HIDDEN, []); hidden.push(logKey(l.time, l.lat)); if (l.id) hidden.push('id:' + l.id); store.set(HIDDEN, hidden.slice(-300));
-    if (l.synced && l.id) { const d = store.get(DELS, []); if (!d.includes(l.id)) d.push(l.id); store.set(DELS, d); }
+    if (l.synced && l.id) { const d = store.get(DELS, []).filter(x => typeof x === 'object'); if (!d.some(x => x.id === l.id)) d.push({id: l.id, code: l.code}); store.set(DELS, d); }
     map.closePopup(); drawMyLogs(); drawSightings(); toast('Log deleted'); sendPending();
   }
   map.on('popupopen', e => { const b = e.popup.getElement().querySelector('.delLog'); if (b) b.addEventListener('click', () => deleteLog(b.dataset.id, b.dataset.time)); });
@@ -146,7 +155,7 @@
   const outcomeOf = note => { const m = /^\[([A-Za-z ,]+)\]\s*/.exec(note || ''); return m && m[1] !== 'seen' ? m[1] : ''; };
   const noteText = note => String(note || '').replace(/^\[[A-Za-z ,]+\]\s*/, '');
   function drawMyLogs() {
-    myLayer.clearLayers(); const logs = store.get(LOGS, []);
+    myLayer.clearLayers(); const logs = boatLogs();
     const hidden = new Set(store.get(HIDDEN, [])), mineKeys = new Set(), mineIds = new Set(logs.map(l => l.id).filter(Boolean));
     logs.forEach(l => {
       if (SIGHT.includes(l.species)) return;                         // sightings have their own symbol
@@ -162,7 +171,7 @@
       L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 650, title: 'Strike ' + r.date.slice(0, 10)})
         .bindPopup(`<b>${esc(r.note || 'Strike')}</b><br>${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${r.bank ? `Near ${esc(r.bank)} <small>(general area only)</small>` : pos2txt(r.lat, r.lon)}`).addTo(myLayer);
     }
-    const waiting = logs.filter(l => !l.synced).length;
+    const waiting = logs.filter(l => !l.synced).length;   // logs = this boat's only
     $('logCount').textContent = logs.length ? `${logs.length} on this phone${waiting ? ` · ${waiting} waiting to send` : ' · all sent'}` : 'none yet';
     $('codeState').textContent = store.get(CODE, '') ? (store.get('sil.boat', '') || 'set') : 'not set';
     $('shareState').textContent = SHARE_TXT[store.get('sil.share', '')] || 'not chosen';
@@ -188,7 +197,7 @@
   $('logDlg').addEventListener('close', () => {
     if ($('logDlg').returnValue !== 'save' || !pendingPos) return;
     const logs = store.get(LOGS, []);
-    logs.push({id: newId(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
+    logs.push({id: newId(), code: curCode(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
                count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: !!last, synced: false});
     store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
     toast('Saved – sending when there is signal');
@@ -197,25 +206,25 @@
   // Send logs to the Google Sheet; anything that fails stays queued and is retried later.
   let sending = false;
   async function sendPending() {
-    const code = store.get(CODE, ''); if (!code || sending || !navigator.onLine) return;
+    if (sending || !navigator.onLine) return;
     sending = true;
     try {
-      for (const id of store.get(DELS, [])) {
+      for (const d of store.get(DELS, []).filter(x => typeof x === 'object' && x.code)) {
         let j = null;
-        try { const r = await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', del: '1', code, id})}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }
-        if (j && j.ok) store.set(DELS, store.get(DELS, []).filter(x => x !== id));
-        else if (j && /code/.test(j.error || '')) { toast('Boat code not accepted – check it under More'); break; }
+        try { const r = await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', del: '1', code: d.code, id: d.id})}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }
+        if (j && (j.ok || /not your log|code/.test(j.error || ''))) store.set(DELS, store.get(DELS, []).filter(x => !(typeof x === 'object' && x.id === d.id)));
         else break;
       }
-      for (const l of store.get(LOGS, []).filter(x => !x.synced)) {
+      for (const l of store.get(LOGS, []).filter(x => !x.synced && x.code)) {
         if (!l.id) l.id = newId();
-        const q = new URLSearchParams({action: 'strikelog', code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0'});
+        const q = new URLSearchParams({action: 'strikelog', code: l.code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0'});
         let j = null;
         try { const r = await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }       // no signal: try later
-        if (j && j.ok && 'share' in j) { store.set('sil.share', j.share || ''); if (!j.share && !askSharing.done) { askSharing.done = true; askSharing(); } }
-        if (j && j.ok) { const all = store.get(LOGS, []); const m = all.find(x => x.id === l.id || x.time === l.time); if (m) { m.synced = true; m.id = l.id; } store.set(LOGS, all); }
-        else if (j && /code/.test(j.error || '')) { toast('Boat code not accepted – check it under More'); break; }
-        else if (j) { toast('Not sent: ' + (j.error || 'unknown')); break; }
+        const current = l.code === curCode();
+        if (j && j.ok && 'share' in j && current) { store.set('sil.share', j.share || ''); if (!j.share && !askSharing.done) { askSharing.done = true; askSharing(); } }
+        if (j && j.ok) { const all = store.get(LOGS, []); const m = all.find(x => x.id === l.id); if (m) m.synced = true; store.set(LOGS, all); }
+        else if (j && /code/.test(j.error || '')) { if (current) toast('Boat code not accepted – check it under More'); continue; }
+        else if (j) { if (current) toast('Not sent: ' + (j.error || 'unknown')); break; }
       }
     } finally { sending = false; drawMyLogs(); }
   }
@@ -251,7 +260,7 @@
   }
   $('codeBtn').addEventListener('click', openCode);
   async function useCode(code, boat, share) {
-    store.set(CODE, code); store.set('sil.boat', boat || ''); store.set('sil.share', share || ''); drawMyLogs(); sendPending();
+    store.set(CODE, code); store.set('sil.boat', boat || ''); store.set('sil.share', share || ''); drawMyLogs(); drawSightings(); sendPending();
     if (!share) askSharing();                                        // first use on this boat: ask for consent
   }
   $('joinBtn').addEventListener('click', async () => {
@@ -268,14 +277,14 @@
     if (!j) return toast('No signal – try again when connected');
     if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Creating codes needs the updated logging script (StrikeLog.gs)' : 'Not created: ' + (j.error || 'unknown'));
     $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCode').hidden = false;
-    store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', ''); drawMyLogs();
+    store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', ''); drawMyLogs(); drawSightings();
   });
   $('shareCodeBtn').addEventListener('click', async () => {
     const text = `Boat code for ${$('newBoatTxt').textContent} on the Marlin strike grid: ${$('newCodeTxt').textContent}\n${location.origin + location.pathname}\n(Open it, More → Boat code → Join)`;
     try { if (navigator.share) await navigator.share({text}); else { await navigator.clipboard.writeText(text); toast('Copied – paste it to your crew'); } } catch {}
   });
   $('codeDoneBtn').addEventListener('click', () => { $('codeDlg').close(); if (!store.get('sil.share', '')) askSharing(); });
-  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); $('codeDlg').close(); });;
+  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); drawSightings(); $('codeDlg').close(); });;
 
   // ---------- track record
   async function loadTrack() {
@@ -301,7 +310,7 @@
   $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
 
   $('sendLogs').addEventListener('click', async () => {
-    const logs = store.get(LOGS, []); if (!logs.length) return toast('No logs yet');
+    const logs = boatLogs(); if (!logs.length) return toast('No logs yet');
     const text = 'Strike grid logs\n' + logs.map(l => `${l.time} | ${l.species} x${l.count} | ${l.lat}, ${l.lon}${l.exact ? '' : ' (map centre)'}${l.note ? ' | ' + l.note : ''}`).join('\n');
     try { if (navigator.share) { await navigator.share({title: 'Strike grid logs', text}); return; } } catch (e) { if (e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
@@ -314,7 +323,7 @@
   async function drawSightings() {
     sightLayer.clearLayers();
     let list = []; try { list = await getJSON('sightings.json'); } catch {}
-    const mine = store.get(LOGS, []).filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l, id: l.id}));
+    const mine = boatLogs().filter(l => SIGHT.includes(l.species)).map(l => ({date: l.time, lat: l.lat, lon: l.lon, what: l.species, own: l, id: l.id}));
     const mineIds = new Set(mine.map(m => m.id).filter(Boolean));
     const seen = new Set(store.get(HIDDEN, []).map(k => k));
     for (const s of [...mine, ...list]) {
@@ -337,7 +346,7 @@
   $('seenDlg').addEventListener('close', () => {
     const v = $('seenDlg').returnValue; if (!SIGHT.includes(v) || !seenPos) return;
     const logs = store.get(LOGS, []);
-    logs.push({id: newId(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '[seen] ' + v, exact: !!last, synced: false});
+    logs.push({id: newId(), code: curCode(), time: new Date().toISOString(), lat: +seenPos[0].toFixed(5), lon: +seenPos[1].toFixed(5), species: v, count: 1, note: '[seen] ' + v, exact: !!last, synced: false});
     store.set(LOGS, logs); drawMyLogs(); drawSightings(); toast(`${v} logged`); sendPending();
   });
 
