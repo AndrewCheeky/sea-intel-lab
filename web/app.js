@@ -230,21 +230,16 @@
   let timesData = null, tomorrow = false, BANKLIST = [];
   const hm = d => d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
   const hspan = (a, b) => { const x = hm(a), y = hm(b), ax = x.slice(-2), by = y.slice(-2); return (ax === by && /[AP]M/i.test(ax) ? x.slice(0, -3) : x) + '–' + y; };
-  function chosenBank() {
-    const k = $('tBank').value;
-    if (k && k !== 'near') { const b = BANKLIST.find(x => x.key === k); if (b) return {bank: b, auto: false}; }
-    if (!BANKLIST.length) return {bank: null, auto: true};
-    const v = store.get('sil.view', 'south'), ref = last || POINTS[v] || POINTS.south;
-    let best = BANKLIST[0], bd = 1e9; for (const b of BANKLIST) { const d = nm(ref, [b.lat, b.lon]); if (d < bd) { bd = d; best = b; } }
-    return {bank: best, auto: true};
+  // One timetable for the whole island: worked out at the average position of all the banks (they differ by only minutes).
+  function islandCentre() {
+    if (!BANKLIST.length) return [17.95, -76.67];
+    return [BANKLIST.reduce((t, b) => t + b.lat, 0) / BANKLIST.length, BANKLIST.reduce((t, b) => t + b.lon, 0) / BANKLIST.length];
   }
   function regionFor(la, lo) { let best = 'south', bd = 1e9; for (const k of ['south', 'east', 'north']) { const d = nm([la, lo], POINTS[k]); if (d < bd) { bd = d; best = k; } } return best; }
   function renderTimes() {
     const now = new Date(), day = new Date(now); day.setHours(0, 0, 0, 0); if (tomorrow) day.setDate(day.getDate() + 1);
     const end = new Date(day.getTime() + 864e5), mid = new Date(day.getTime() + 432e5);
-    const {bank, auto} = chosenBank();
-    const [la, lo] = bank ? [bank.lat, bank.lon] : (last || POINTS[store.get('sil.view', 'south')] || POINTS.south), pk = regionFor(la, lo);
-    const near = $('tBank').querySelector('option[value="near"]'); if (near) near.textContent = auto && bank ? `Nearest: ${bank.name}` : 'Nearest bank';
+    const [la, lo] = islandCentre(), ref = last || POINTS[store.get('sil.view', 'south')] || POINTS.south, pk = regionFor(ref[0], ref[1]);
     const sun = Sky.sunTimes(mid, la, lo);
     const win = [
       {start: sun.dawn, end: new Date(sun.sunrise.getTime() + 36e5), label: `Dawn ${hspan(sun.dawn, new Date(sun.sunrise.getTime() + 36e5))}`, why: 'First light to an hour after sunrise: fish often feed near the surface.'},
@@ -273,12 +268,7 @@
   }
   function setDay(t) { tomorrow = t; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
   $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
-  $('tBank').addEventListener('change', e => { store.set('sil.bank', e.target.value); renderTimes(); });
-  getJSON('banks.json').then(bs => {
-    BANKLIST = bs.filter(b => b.name && b.lat != null && b.lon != null).sort((a, b) => a.name.localeCompare(b.name));
-    $('tBank').innerHTML = '<option value="near">Nearest bank</option>' + BANKLIST.map(b => `<option value="${esc(b.key)}">${esc(b.name)}</option>`).join('');
-    const saved = store.get('sil.bank', 'near'); $('tBank').value = BANKLIST.some(b => b.key === saved) ? saved : 'near'; renderTimes();
-  }).catch(() => {});
+  getJSON('banks.json').then(bs => { BANKLIST = bs.filter(b => b.lat != null && b.lon != null); renderTimes(); }).catch(() => {});
   getJSON('times.json').then(t => { timesData = t; renderTimes(); }).catch(() => renderTimes());
   setInterval(renderTimes, 300000);
 
