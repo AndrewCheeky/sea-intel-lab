@@ -30,6 +30,11 @@ SIGMA_NM = dict(drop=2.0, front=2.5, release=3.0, zoo=2.5, conv=3.0, temp=3.0)
 ALIGN_BONUS = .06      # a temperature break lining up with the drop-off or the colour change
 COOL_BONUS = .04       # the cooler side of a break (water a little cooler than around it)
 COMFORT_C = (23.0, 30.5)   # outside this, scores are lowered
+SIGHT_BONUS = .12          # birds / bait / weed seen recently (fades quickly)
+SIGHT_HALF_LIFE_H = 6
+SIGHTINGS = ('Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log')
+# Reference spots for the "best times" strip (tides and current turns)
+TIME_POINTS = {'south': (17.70, -76.88), 'east': (17.85, -76.15), 'north': (18.55, -77.60)}
 COS = math.cos(math.radians(17.7))
 # Map image layout of chlorophyll-latest.png (fixed by the source site's composite.py)
 MAP_EXTENT = (-79.5, -74.5, 16.0, 20.0)
@@ -246,7 +251,10 @@ def read_logs():
     return out
 
 
-def is_strike(r): return r['count'] > 0 and r['species'] != 'No strikes here'
+def is_sighting(r): return r['species'] in SIGHTINGS
+
+
+def is_strike(r): return r['count'] > 0 and r['species'] != 'No strikes here' and not is_sighting(r)
 
 
 NE_DEPTHS = (('ne_10m_bathymetry_K_200', 200), ('ne_10m_bathymetry_J_1000', 1000), ('ne_10m_bathymetry_I_2000', 2000))
@@ -375,6 +383,14 @@ def main():
         d = nm_between(GLAT, GLON, r['lat'], r['lon']); d_rel = np.minimum(d_rel, d)
         s_rel = np.maximum(s_rel, r['weight'] * gauss(d, SIGMA_NM['release']))
 
+    # birds / bait / weed seen in the last 18 hours: a short-lived lift around each sighting
+    now = datetime.now(timezone.utc)
+    sightings = [r for r in logs if is_sighting(r) and 0 <= (now - r['when']).total_seconds() < 18 * 3600]
+    s_sight = np.zeros(GLAT.shape); d_sight = np.full(GLAT.shape, 999.0)
+    for r in sightings:
+        d = nm_between(GLAT, GLON, r['lat'], r['lon']); d_sight = np.minimum(d_sight, d)
+        s_sight = np.maximum(s_sight, 0.5 ** ((now - r['when']).total_seconds() / 3600 / SIGHT_HALF_LIFE_H) * gauss(d, 2.0))
+
     s = dict(drop=s_drop, front=gauss(d_front, SIGMA_NM['front']), zoo=gauss(d_zoo, SIGMA_NM['zoo']),
              conv=gauss(d_conv, SIGMA_NM['conv']), release=s_rel, temp=gauss(d_temp, SIGMA_NM['temp']))
     used = {k: v for k, v in WEIGHTS.items() if not (k == 'front' and white is None) and not (k == 'zoo' and pink is None)
@@ -384,6 +400,7 @@ def main():
     # Side-by-side comparison: the same score WITHOUT sea temperature, kept only for the track record
     used_alt = {k: v for k, v in used.items() if k != 'temp'}
     alt = sum(used_alt[k] / sum(used_alt.values()) * s[k] for k in used_alt)
+    score = score + SIGHT_BONUS * s_sight; alt = alt + SIGHT_BONUS * s_sight
     if breaks:                                              # break lining up with the drop-off or the colour change
         score = score + ALIGN_BONUS * s['temp'] * np.maximum(s['drop'], s['front'])
     cool = np.zeros(GLAT.shape)
@@ -430,7 +447,8 @@ def main():
             rows.append([int(i), int(j), int(round(v * 1000)), int(round(float(depth[i, j]))) if depth is not None else -1, int(round(float(s_drop[i, j]) * 100)),
                          q10(d_front[i, j]) if white is not None else -1, q10(d_zoo[i, j]) if pink is not None else -1,
                          q10(d_conv[i, j]) if conv else -1, q10(d_rel[i, j]) if rel else -1,
-                         q10(d_temp[i, j]) if breaks else -1, int(round(float(cool[i, j]) * 100))])
+                         q10(d_temp[i, j]) if breaks else -1, int(round(float(cool[i, j]) * 100)),
+                         q10(d_sight[i, j]) if sightings else -1])
             if v < .62: continue                     # the KML keeps Good and better only (file size)
             feats.append({'type': 'Feature', 'properties': dict(score=round(v, 3), cls=cls, lat=la, lon=lo, **why),
                           'geometry': {'type': 'Polygon', 'coordinates': [[[round(lo - h, 5), round(la - h, 5)], [round(lo + h, 5), round(la - h, 5)],
@@ -472,6 +490,12 @@ def main():
     except Exception as e:
         log('depth lines for the map unavailable:', e)
     write_kml(feats, top, rel, meta); write_gpx(top, rel)
+    (OUT / 'sightings.json').write_text(json.dumps([{'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': round(r['lat'], 4), 'lon': round(r['lon'], 4),
+                                                      'what': r['species']} for r in logs if is_sighting(r) and (now - r['when']).total_seconds() < 48 * 3600], indent=1))
+    try:
+        (OUT / 'times.json').write_text(json.dumps(build_times(), separators=(',', ':')))
+    except Exception as e:
+        log('tide / current times unavailable:', e)
     # this build's grid, kept for the track record (scores ×1000 for every shaded square)
     ocean = int(np.count_nonzero(score > 0))
     shaded = [[int(i), int(j), int(round(float(score[i, j]) * 1000))] for i, j in zip(*np.nonzero(score >= .32))]
@@ -498,7 +522,7 @@ def track_record(logs):
             log('bad snapshot', f.name, e)
     cls_of = lambda v: next((c for t, c in [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')] if v >= t), 'Not shaded')
     entries, cover_hi, cover_good, alt_cover = [], [], [], []
-    for r in sorted(logs, key=lambda x: x['when']):
+    for r in sorted((x for x in logs if not is_sighting(x)), key=lambda x: x['when']):   # sightings aren't strikes or quiet spots
         before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
         e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']))
         if not before:
@@ -541,6 +565,40 @@ def compare(scored, alt_cover):
                             quiet_below_good=sum(e[key] < .62 for e in qu))
     return dict(strikes=len(st), quiet=len(qu), with_temp=side('score'), without_temp=side('score_no_temp'),
                 area_share_without_temp=dict(high_plus=avg([a for a, _ in alt_cover]), good_plus=avg([b for _, b in alt_cover])))
+
+
+# ---------------- best times: tide turns and current turns (sun and moon are worked out on the phone)
+def turning_points(times, vals, kind_hi, kind_lo):
+    out = []
+    for k in range(1, len(vals) - 1):
+        a, b, c = vals[k - 1], vals[k], vals[k + 1]
+        if None in (a, b, c): continue
+        if (b > a and b >= c) or (b < a and b <= c):
+            den = a - 2 * b + c
+            off = 0.5 * (a - c) / den if den else 0          # refine between the hours
+            t = parse_time(times[k]) + __import__('datetime').timedelta(hours=max(-.5, min(.5, off)))
+            out.append({'time': t.strftime('%Y-%m-%dT%H:%MZ'), 'type': kind_hi if b > a else kind_lo})
+    return out
+
+
+def build_times():
+    out = {}
+    for name, (la, lo) in TIME_POINTS.items():
+        q = urllib.parse.urlencode({'latitude': la, 'longitude': lo, 'hourly': 'sea_level_height_msl,ocean_current_velocity,ocean_current_direction',
+                                    'timezone': 'GMT', 'forecast_days': 3, 'past_days': 1, 'cell_selection': 'sea'})
+        h = json.loads(fetch('https://marine-api.open-meteo.com/v1/marine?' + q, timeout=60))['hourly']
+        t = [x + 'Z' for x in h['time']]
+        tides = turning_points(t, h.get('sea_level_height_msl') or [], 'high', 'low')
+        spd = h.get('ocean_current_velocity') or []; dirs = h.get('ocean_current_direction') or []
+        turns = [x for x in turning_points(t, spd, 'strongest', 'slack') if x['type'] == 'slack']
+        for k in range(1, len(dirs)):                         # direction swings of 60°+ within an hour
+            if dirs[k] is None or dirs[k - 1] is None: continue
+            dd = abs((dirs[k] - dirs[k - 1] + 180) % 360 - 180)
+            if dd >= 60: turns.append({'time': t[k], 'type': 'turn'})
+        rng = [v for v in (h.get('sea_level_height_msl') or []) if v is not None]
+        out[name] = {'tides': tides, 'current': sorted(turns, key=lambda x: x['time']),
+                     'tide_range_m': round(max(rng) - min(rng), 2) if rng else None}
+    return {'built_utc': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'points': out}
 
 
 # ---------------- coast

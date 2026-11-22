@@ -1,8 +1,8 @@
 /* Keeps the strike grid usable offshore: the page and the latest grid are saved when opened with signal. */
-const CACHE = 'sil-v10';
-const SHELL = ['./', 'index.html', 'app.js?v=9', 'app.css?v=9', 'manifest.webmanifest',
+const CACHE = 'sil-v11';
+const SHELL = ['./', 'index.html', 'app.js?v=10', 'app.css?v=10', 'manifest.webmanifest', 'sky.js?v=1',
   'vendor/leaflet/leaflet.css', 'vendor/leaflet/leaflet.js'];
-const DATA = ['grid.json', 'top-spots.json', 'releases.json', 'meta.json', 'coast.geojson', 'banks.json', 'strike-grid.kml', 'top-spots.gpx', 'track-record.json', 'contours.geojson'];
+const DATA = ['grid.json', 'top-spots.json', 'releases.json', 'meta.json', 'coast.geojson', 'banks.json', 'strike-grid.kml', 'top-spots.gpx', 'track-record.json', 'contours.geojson', 'times.json', 'sightings.json'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled([...SHELL, ...DATA].map(u => c.add(u)))).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {

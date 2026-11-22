@@ -18,6 +18,7 @@ async def main():
         await pg.click('#moreBtn'); await pg.click('#contours'); await pg.wait_for_timeout(1200)
         labels = await pg.evaluate("document.querySelectorAll('.dlabel').length")
         print(f'depth labels shown: {labels}')
+        print('times strip:', await pg.inner_text('#chips'), '|', await pg.inner_text('#moonLine'))
         await pg.click('#moreBtn')
         await pg.click('#boatBtn'); await pg.wait_for_timeout(1500)
         here = await pg.inner_text('#here'); best = await pg.inner_text('#best')

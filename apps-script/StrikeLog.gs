@@ -22,7 +22,8 @@
 const STRIKELOG = {
   SHEET_NAME: 'Strike grid logs',
   HEADER: ['Received (UTC)', 'Logged at (phone)', 'Lat', 'Lon', 'Species', 'Count', 'Note', 'Exact GPS', 'Id'],
-  SPECIES: ['Blue marlin', 'White marlin', 'Sailfish', 'Wahoo', 'Dolphin (mahi)', 'Tuna', 'No strikes here', 'Other'],
+  SPECIES: ['Blue marlin', 'White marlin', 'Sailfish', 'Wahoo', 'Dolphin (mahi)', 'Tuna', 'No strikes here', 'Other',
+            'Birds working', 'Bait (surface)', 'Bait (sounder)', 'Fish busting', 'Weedline', 'Debris / log'],   // last six: sightings
   MAX_PER_DAY: 300,
   BOX: {south: 15.5, north: 20.5, west: -80, east: -73.5},
 };

@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=9">
+<link rel="stylesheet" href="app.css?v=10">
 </head>
 <body>
 <header class="top">
@@ -24,6 +24,14 @@
   <button id="infoBtn" class="icon" aria-label="About this map" aria-expanded="false">?</button>
 </header>
 
+<section class="times" aria-label="Best times">
+  <div class="tday" role="group" aria-label="Day">
+    <button id="tToday" aria-pressed="true">Today</button><button id="tTomorrow" aria-pressed="false">Tomorrow</button>
+  </div>
+  <div id="chips" class="chips"></div>
+  <div id="moonLine" class="moonline"></div>
+</section>
+
 <div id="map" aria-label="Map of the strike grid south of Kingston"></div>
 
 <section id="boatBar" class="boatbar" hidden aria-live="polite">
@@ -33,9 +41,10 @@
 </section>
 
 <nav class="actions">
-  <button id="boatBtn" class="primary">Show my boat</button>
+  <button id="boatBtn" class="primary">My boat</button>
   <button id="followBtn" disabled aria-pressed="false">Follow</button>
-  <button id="logBtn">Log release</button>
+  <button id="logBtn">Release</button>
+  <button id="seenBtn">Birds/bait</button>
   <button id="moreBtn" aria-expanded="false">More</button>
 </nav>
 
@@ -73,6 +82,19 @@
   Your boat position stays on your phone. Only the releases you log are sent, to your own private sheet, and only after you enter a logging code.</p>
 </div>
 
+<dialog id="seenDlg">
+  <form method="dialog">
+    <h2>What did you see?</h2>
+    <p id="seenWhere" class="small">Uses your boat position.</p>
+    <div class="seenGrid">
+      <button value="Birds working">Birds working</button><button value="Fish busting">Fish busting</button>
+      <button value="Bait (surface)">Bait on top</button><button value="Bait (sounder)">Bait on sounder</button>
+      <button value="Weedline">Weedline</button><button value="Debris / log">Debris / log</button>
+    </div>
+    <div class="dlgBtns"><button value="cancel" formnovalidate>Cancel</button></div>
+  </form>
+</dialog>
+
 <dialog id="logDlg">
   <form method="dialog" id="logForm">
     <h2>Log a release</h2>
@@ -87,6 +109,7 @@
 </dialog>
 
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="app.js?v=9"></script>
+<script src="sky.js?v=1"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
