@@ -231,7 +231,7 @@
 
   // ---------- best times strip: dawn/dusk and solunar periods (worked out on the phone), tide and current turns (from the build)
   const POINTS = {south: [17.70, -76.88], east: [17.85, -76.15], north: [18.55, -77.60], all: [17.70, -76.88]};
-  let timesData = null, tomorrow = false, BANKLIST = [];
+  let timesData = null, tomorrow = false, BANKLIST = [], showAllTimes = false;
   const hm = d => d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
   const hspan = (a, b) => { const x = hm(a), y = hm(b), ax = x.slice(-2), by = y.slice(-2); return (ax === by && /[AP]M/i.test(ax) ? x.slice(0, -3) : x) + '–' + y; };
   // One timetable for the whole island: worked out at the average position of all the banks (they differ by only minutes).
@@ -262,15 +262,21 @@
     }
     for (const it of items) if (it.kind === 'tide' || it.kind === 'current') it.prime = [...win, ...sol].some(w => it.at >= w.start && it.at <= w.end);
     items.sort((a, b) => a.start - b.start);
+    // Compact by default: what's on now, the next thing coming, and anything Prime still ahead. The rest behind "+N more".
+    const ahead = items.filter(it => it.end >= now), nextUp = ahead.find(it => it.start > now);
+    const show = items.map(it => showAllTimes || (it.end >= now && (it.prime || (now >= it.start && now <= it.end) || it === nextUp)));
+    const hidden = show.filter(v => !v).length;
     $('chips').innerHTML = items.map((it, k) => {
+      if (!show[k]) return '';
       const cls = ['chip', it.kind, it.prime ? 'prime' : '', now >= it.start && now <= it.end ? 'now' : '', it.end < now ? 'past' : ''].join(' ');
       return `<button class="${cls}" data-k="${k}" title="${esc(it.why)}">${it.prime ? 'Prime · ' : ''}${esc(it.label)}</button>`;
-    }).join('');
-    $('chips').querySelectorAll('button.chip').forEach(b => b.addEventListener('click', () => toast(items[+b.dataset.k].why)));
+    }).join('') + (hidden ? `<button class="chip more" id="chipMore">+${hidden} more</button>` : showAllTimes ? '<button class="chip more" id="chipMore">Show less</button>' : '');
+    $('chips').querySelectorAll('button.chip[data-k]').forEach(b => b.addEventListener('click', () => toast(items[+b.dataset.k].why)));
+    const mb = $('chipMore'); if (mb) mb.addEventListener('click', () => { showAllTimes = !showAllTimes; renderTimes(); });
     const il = Sky.moonIllum(mid);
     $('moonLine').textContent = `${Sky.phaseName(il.phase)}, ${Math.round(il.fraction * 100)}% lit`;
   }
-  function setDay(t) { tomorrow = t; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
+  function setDay(t) { tomorrow = t; showAllTimes = false; $('tToday').setAttribute('aria-pressed', !t); $('tTomorrow').setAttribute('aria-pressed', t); renderTimes(); }
   $('tToday').addEventListener('click', () => setDay(false)); $('tTomorrow').addEventListener('click', () => setDay(true));
   getJSON('banks.json').then(bs => { BANKLIST = bs.filter(b => b.lat != null && b.lon != null); renderTimes(); }).catch(() => {});
   getJSON('times.json').then(t => { timesData = t; renderTimes(); }).catch(() => renderTimes());
