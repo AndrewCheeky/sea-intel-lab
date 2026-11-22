@@ -9,6 +9,10 @@ async def main():
         b = await p.chromium.launch()
         ctx = await b.new_context(viewport={'width': 390, 'height': 844}, geolocation={'latitude': 17.712, 'longitude': -76.8805}, permissions=['geolocation'])
         pg = await ctx.new_page(); errs = []
+        from datetime import datetime, timezone
+        t = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+        await ctx.add_init_script("if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', 1); localStorage.setItem('sil.logs', JSON.stringify([{id: 'smoke-1', time: '%s', lat: 17.70, lon: -76.90, species: 'Birds working', count: 1, note: '[seen] Birds working', exact: false, synced: false}])); }" % t)
+        pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
         pg.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
         pg.on('pageerror', lambda e: errs.append(str(e)))
         await pg.goto('http://127.0.0.1:8765/index.html', wait_until='networkidle'); await pg.wait_for_timeout(1500)
@@ -33,6 +37,15 @@ async def main():
                 el = await pg.query_selector('.leaflet-popup-content'); bank_popup = (await el.inner_text()) if el else '(no popup)'; break
         print(f'bank pins: {len(pins)}  popup: {bank_popup[:160]!r}')
         await pg.keyboard.press('Escape'); await pg.mouse.click(5, 820)
+        # delete the seeded bird log from its popup
+        await pg.evaluate("document.querySelectorAll('.sheet').forEach(s => s.hidden = true)")
+        seen = await pg.query_selector('.seen'); deleted = None
+        if seen:
+            await seen.click(); await pg.wait_for_timeout(400)
+            btn = await pg.query_selector('.leaflet-popup .delLog')
+            if btn: await btn.click(); await pg.wait_for_timeout(600)
+            deleted = await pg.evaluate("JSON.parse(localStorage.getItem('sil.logs') || '[]').length === 0 && !document.querySelector('.seen')")
+        print('delete a log:', deleted)
         await pg.click('#moreBtn')
         await pg.click('#boatBtn'); await pg.wait_for_timeout(1500)
         here = await pg.inner_text('#here'); best = await pg.inner_text('#best')
@@ -40,5 +53,5 @@ async def main():
         print('plan with boat:', await pg.inner_text('#plan'))
         print(f'built: {built}\nlayers: {squares}  top spots: {spots}\nboat square: {here}  best nearby: {best}\nerrors: {errs}')
         await b.close()
-        if errs or 'Could not' in built or not spots or ('Wind' not in bank_popup and 'not available' not in bank_popup): sys.exit(1)
+        if errs or 'Could not' in built or not spots or deleted is not True or ('Wind' not in bank_popup and 'not available' not in bank_popup): sys.exit(1)
 asyncio.run(main())
