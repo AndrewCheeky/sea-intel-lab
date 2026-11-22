@@ -1,0 +1,26 @@
+name: Probe build
+on:
+  push:
+    branches: [probe-2]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install numpy scipy pillow matplotlib playwright >/dev/null && python -m playwright install --with-deps chromium >/dev/null
+      - run: |
+          git fetch --depth 1 origin history && git worktree add history FETCH_HEAD
+          mkdir -p cache && cp history/depth/* cache/ 2>/dev/null || true
+      - run: python scripts/build_grid.py
+        env: {SOURCE_SITE: 'https://andrewcheeky.github.io/jamaica-marine-currents/'}
+      - run: |
+          cp web/* site/ && mkdir -p site/vendor/leaflet tmp && (cd tmp && npm pack leaflet@1.9.4 --silent && tar xzf leaflet-1.9.4.tgz)
+          cp -r tmp/package/dist/leaflet.js tmp/package/dist/leaflet.css tmp/package/dist/images site/vendor/leaflet/
+          python scripts/smoke_test.py site
+          python scripts/probe_shots.py site
+          head -c 600 site/conditions.json; echo; head -c 800 site/weed.json; echo; cat site/confidence.json
+      - uses: actions/upload-artifact@v4
+        with: {name: shots, path: 'shots/*.png'}
