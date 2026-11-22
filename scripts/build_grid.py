@@ -556,7 +556,7 @@ def read_conditions(top):
 
 # ---------------- weed (floating algae) seen by satellite
 AFAI_HOST = 'https://cwcgom.aoml.noaa.gov/erddap/griddap/'
-WEED_MIN = 2.5e-4          # how far above the surrounding water a pixel must be to count as weed
+WEED_MIN = 1.2e-3          # how far above the surrounding water a pixel must be to count as weed (about the top 1%)
 
 
 def afai(dataset, stride=1):
@@ -572,7 +572,7 @@ def afai(dataset, stride=1):
     return rows[0][0][:10], lat, lon, a
 
 
-def water_mask(lat, lon, depth, min_depth=30):
+def water_mask(lat, lon, depth, min_depth=50):
     """Open water away from reefs and shallows (bottom and surf show up like weed)."""
     from scipy.interpolate import RegularGridInterpolator
     LA, LO = np.meshgrid(lat, lon, indexing='ij')
@@ -586,7 +586,7 @@ def water_mask(lat, lon, depth, min_depth=30):
     for f in coast_geojson()['features']:
         for ring in polygon_rings(f['geometry']): land |= MPath(np.asarray(ring)).contains_points(flat).reshape(LA.shape)
     from scipy.ndimage import binary_dilation
-    ok &= ~binary_dilation(land, iterations=2)
+    ok &= ~binary_dilation(land, iterations=3)
     if BANKS:
         near = np.zeros(LA.shape, bool)
         for b in BANKS: near |= nm_between(LA, LO, b['lat'], b['lon']) < BANK_REACH_NM + 10
@@ -608,14 +608,14 @@ def read_weed(depth):
     pts = []
     for k in range(1, n + 1):
         ii, jj = np.nonzero(lab == k)
-        if len(ii) < 2: continue                         # single pixels are mostly noise
+        if len(ii) < 3: continue                         # one or two pixels are mostly noise
         pts.append(dict(lat=round(float(LA[ii, jj].mean()), 4), lon=round(float(LO[ii, jj].mean()), 4), size=int(len(ii)),
                         strength=round(float(np.nanmax(d[ii, jj]) / WEED_MIN), 1)))
     pts.sort(key=lambda p: -p['size'] * p['strength'])
     pc = {q: round(float(np.nanpercentile(d, q)), 5) for q in (50, 90, 99, 99.5, 99.9)}
     log(f'weed: {date} {int(valid.sum())} clear water pixels, {n} patches, {len(pts)} kept, spread {pc}, raw {[round(float(np.nanpercentile(a[valid], q)), 5) for q in (50, 99)]}')
     log('weed biggest:', pts[:8])
-    return {'date': date, 'patches': pts[:200]}
+    return {'date': date, 'patches': pts[:60]}
 
 
 def read_clear_sky(depth):
