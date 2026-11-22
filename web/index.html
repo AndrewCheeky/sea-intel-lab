@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=14">
+<link rel="stylesheet" href="app.css?v=15">
 </head>
 <body>
 <header class="top">
@@ -33,6 +33,9 @@
   <div id="moonLine" class="moonline"></div>
 </section>
 
+<button id="plan" class="plan" hidden></button>
+<button id="newVer" class="newver" hidden>New version ready · tap to refresh</button>
+
 <div id="map" aria-label="Map of the strike grid south of Kingston"></div>
 
 <section id="boatBar" class="boatbar" hidden aria-live="polite">
@@ -51,12 +54,14 @@
 </nav>
 
 <div id="more" class="sheet" hidden>
-  <a class="row" href="strike-grid.kml" download>Download KML <small>Google Earth / My Maps</small></a>
-  <a class="row" href="top-spots.gpx" download>Download GPX <small>Top spots for Navionics</small></a>
+  <div class="grp">Map layers</div>
   <label class="row"><input type="checkbox" id="contours"> Depth lines <small>200 m = edge of the shelf</small></label>
   <label class="row"><input type="checkbox" id="curArrows"> Current arrows <small>which way the water is running</small></label>
   <label class="row"><input type="checkbox" id="weedLayer"> Weed seen by satellite <small id="weedDate">last 3 days</small></label>
   <label class="row"><input type="checkbox" id="tiles"> Detailed background map <small>needs signal</small></label>
+  <div class="grp">Files and logs</div>
+  <a class="row" href="strike-grid.kml" download>Download KML <small>Google Earth / My Maps</small></a>
+  <a class="row" href="top-spots.gpx" download>Download GPX <small>Top spots for Navionics</small></a>
   <button class="row" id="trackBtn">Track record <small id="trackShort">–</small></button>
   <button class="row" id="codeBtn">Logging code <small id="codeState">not set</small></button>
   <button class="row" id="sendLogs">Share my logs as text <small id="logCount">none yet</small></button>
@@ -120,6 +125,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>
