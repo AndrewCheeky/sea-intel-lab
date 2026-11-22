@@ -111,7 +111,7 @@
 
   // ---------- releases logged on this phone
   const LOGS = 'sil.logs', CODE = 'sil.code';
-  const LOG_URL = 'https://script.google.com/macros/s/AKfycbyFY483SYd2P772OZbtMiMTD6CUUuTwLFsJBm2GLxmxmZk2uBm9oUr2N2emOf41L1_CTw/exec';
+  const LOG_URL = 'https://script.google.com/macros/s/AKfycbzwP_tF1SeJIBgB7HxTRBi374NiF0tQXGcSBFUk7EPPu1rSAepDsALW-iHeny6yo1Y/exec';   // marine Apps Script
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9-]/g, '');
   const myLayer = L.layerGroup().addTo(map);
   function drawMyLogs() {
