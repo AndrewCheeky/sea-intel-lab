@@ -1,8 +1,7 @@
 name: Build strike grid
 on:
-  schedule:
-    # ~35 minutes after each Sea Intelligence map run (12:15 AM, 6:15 AM, 12:15 PM, 6:15 PM Jamaica)
-    - cron: '50 5,11,17,23 * * *'
+  # Started by the marine Apps Script refresh chain (RefreshChain.gs), after the Sea Intelligence maps.
+  # GitHub's own timer is off because it ran hours late. Pushes to main still rebuild.
   workflow_dispatch:
   push:
     branches: [main]
