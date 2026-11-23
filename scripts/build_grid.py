@@ -26,6 +26,7 @@ BASE = os.getenv('SOURCE_SITE', 'https://andrewcheeky.github.io/jamaica-marine-c
 AREA = dict(west=-79.50, east=-74.50, south=16.00, north=20.00)   # same area as the Fishing Intelligence map
 CELL = 0.01
 WEIGHTS = dict(drop=.27, front=.27, release=.18, zoo=.12, temp=.12, conv=.04)
+DROP_BOOST = .30          # comparison version: the drop-off lifts the daily signals by up to 30% instead of scoring on its own
 SIGMA_NM = dict(drop=2.0, front=2.5, release=3.0, zoo=2.5, conv=3.0, temp=3.0)
 ALIGN_BONUS = .06      # a temperature break lining up with the drop-off or the colour change
 COOL_BONUS = .04       # the cooler side of a break (water a little cooler than around it)
@@ -419,15 +420,21 @@ def main():
     # Side-by-side comparison: the same score WITHOUT sea temperature, kept only for the track record
     used_alt = {k: v for k, v in used.items() if k != 'temp'}
     alt = sum(used_alt[k] / sum(used_alt.values()) * s[k] for k in used_alt)
-    score = score + SIGHT_BONUS * s_sight; alt = alt + SIGHT_BONUS * s_sight
+    # Comparison version: the daily signals decide, the drop-off only boosts them (kept for the track record)
+    used_dyn = {k: v for k, v in used.items() if k != 'drop'}
+    boost = sum(used_dyn[k] / max(sum(used_dyn.values()), 1e-6) * s[k] for k in used_dyn) if used_dyn else np.zeros(GLAT.shape)
+    boost = boost * (1 + DROP_BOOST * s['drop'])
+    score = score + SIGHT_BONUS * s_sight; alt = alt + SIGHT_BONUS * s_sight; boost = boost + SIGHT_BONUS * s_sight
     if breaks:                                              # break lining up with the drop-off or the colour change
         score = score + ALIGN_BONUS * s['temp'] * np.maximum(s['drop'], s['front'])
+        boost = boost + ALIGN_BONUS * s['temp'] * s['front']
     cool = np.zeros(GLAT.shape)
     if sst_anom is not None:                                # cooler side of a break, within comfortable water
         cool = np.clip(-sst_anom / .4, 0, 1) * np.maximum(s['temp'], .35 * s['front'])
-        score = score + COOL_BONUS * cool
+        score = score + COOL_BONUS * cool; boost = boost + COOL_BONUS * cool
         lo, hi = COMFORT_C
-        score = score * np.where((sst < lo) | (sst > hi), .7, 1.0)
+        comfy = np.where((sst < lo) | (sst > hi), .7, 1.0)
+        score = score * comfy; boost = boost * comfy
 
     # no score on land or within 0.5 NM of it
     land = np.zeros(GLAT.shape, bool)
@@ -442,8 +449,8 @@ def main():
     mask = binary_dilation(land, iterations=1)
     if BANKS:                                               # only the waters around the banks
         mask |= dist_to_points([(b['lat'], b['lon']) for b in BANKS]) > BANK_REACH_NM
-    score[mask] = 0; alt[mask] = 0
-    score = score / max(score.max(), 1e-6); alt = alt / max(alt.max(), 1e-6)
+    score[mask] = 0; alt[mask] = 0; boost[mask] = 0
+    score = score / max(score.max(), 1e-6); alt = alt / max(alt.max(), 1e-6); boost = boost / max(boost.max(), 1e-6)
 
     classes = [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')]
     feats = []
@@ -554,8 +561,11 @@ def main():
     ocean = int(np.count_nonzero(score > 0))
     shaded = [[int(i), int(j), int(round(float(score[i, j]) * 1000))] for i, j in zip(*np.nonzero(score >= .32))]
     shaded_alt = [[int(i), int(j), int(round(float(alt[i, j]) * 1000))] for i, j in zip(*np.nonzero(alt >= .32))]
+    shaded_boost = [[int(i), int(j), int(round(float(boost[i, j]) * 1000))] for i, j in zip(*np.nonzero(boost >= .32))]
+    log('drop-off as booster: %d of %d shaded squares are High+ (now: %d)' % (sum(1 for c in shaded_boost if c[2] >= 770), len(shaded_boost),
+        int((score >= .77).sum())))
     (OUT / 'snapshot.json').write_text(json.dumps(dict(built_utc=built, area=AREA, cell=CELL, ocean_cells=ocean, cells=shaded,
-                                                       variants={'no_temp': shaded_alt}), separators=(',', ':')))
+                                                       variants={'no_temp': shaded_alt, 'drop_boost': shaded_boost}), separators=(',', ':')))
     track_record(logs)
     log(f'{len(feats)} squares, top spots {[(t["lat"], t["lon"]) for t in top]}, sources {sources}')
 
@@ -706,11 +716,13 @@ def track_record(logs):
             d['lookup'] = {(c[0], c[1]): c[2] / 1000 for c in d['cells']}
             alt = (d.get('variants') or {}).get('no_temp')
             d['lookup_alt'] = {(c[0], c[1]): c[2] / 1000 for c in alt} if alt is not None else None
+            bst = (d.get('variants') or {}).get('drop_boost')
+            d['lookup_boost'] = {(c[0], c[1]): c[2] / 1000 for c in bst} if bst is not None else None
             snaps.append(d)
         except Exception as e:
             log('bad snapshot', f.name, e)
     cls_of = lambda v: next((c for t, c in [(.9, 'Highest'), (.77, 'High'), (.62, 'Good'), (.47, 'Medium'), (.32, 'Low')] if v >= t), 'Not shaded')
-    entries, cover_hi, cover_good, alt_cover = [], [], [], []
+    entries, cover_hi, cover_good, alt_cover, boost_cover = [], [], [], [], []
     for r in sorted((x for x in logs if not is_sighting(x)), key=lambda x: x['when']):   # sightings aren't strikes or quiet spots
         before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
         e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']),
@@ -727,6 +739,10 @@ def track_record(logs):
             va = s['lookup_alt'].get((i, j), 0.0); e.update(score_no_temp=round(va, 2), cls_no_temp=cls_of(va))
             n = max(s['ocean_cells'], 1)
             alt_cover.append((sum(1 for x in s['lookup_alt'].values() if x >= .77) / n, sum(1 for x in s['lookup_alt'].values() if x >= .62) / n))
+        if s.get('lookup_boost') is not None:
+            vb = s['lookup_boost'].get((i, j), 0.0); e.update(score_boost=round(vb, 2), cls_boost=cls_of(vb))
+            n = max(s['ocean_cells'], 1)
+            boost_cover.append((sum(1 for x in s['lookup_boost'].values() if x >= .77) / n, sum(1 for x in s['lookup_boost'].values() if x >= .62) / n))
         n = max(s['ocean_cells'], 1)
         cover_hi.append(sum(1 for x in s['lookup'].values() if x >= .77) / n)
         cover_good.append(sum(1 for x in s['lookup'].values() if x >= .62) / n)
@@ -741,6 +757,7 @@ def track_record(logs):
                not_scored=len(entries) - len(sc), private_logs=sum(1 for e in entries if not e['public']),
                entries=[{k: v for k, v in e.items() if k != 'public'} for e in entries if e['public']][-50:],   # private logs count but aren't listed
                comparison=compare(sc, alt_cover),
+               booster=compare_boost(sc, boost_cover),
                by_region={reg: dict(scored=sum(1 for e in st if e['region'] == reg), high_plus=sum(1 for e in st if e['region'] == reg and e['score'] >= .77))
                           for reg in REGIONS})
     (OUT / 'track-record.json').write_text(json.dumps(out, indent=1))
@@ -756,6 +773,17 @@ def compare(scored, alt_cover):
                             quiet_below_good=sum(e[key] < .62 for e in qu))
     return dict(strikes=len(st), quiet=len(qu), with_temp=side('score'), without_temp=side('score_no_temp'),
                 area_share_without_temp=dict(high_plus=avg([a for a, _ in alt_cover]), good_plus=avg([b for _, b in alt_cover])))
+
+
+def compare_boost(scored, cover):
+    """Now vs 'drop-off as booster', over logs scored by grids that kept both versions."""
+    both = [e for e in scored if 'score_boost' in e]
+    st = [e for e in both if e['strike']]; qu = [e for e in both if not e['strike']]
+    avg = lambda xs: round(sum(xs) / len(xs), 3) if xs else None
+    side = lambda key: dict(strikes_high_plus=sum(e[key] >= .77 for e in st), strikes_good_plus=sum(e[key] >= .62 for e in st),
+                            quiet_below_good=sum(e[key] < .62 for e in qu))
+    return dict(strikes=len(st), quiet=len(qu), now=side('score'), booster=side('score_boost'),
+                area_share_booster=dict(high_plus=avg([a for a, _ in cover]), good_plus=avg([b for _, b in cover])))
 
 
 # ---------------- best times: tide turns and current turns (sun and moon are worked out on the phone)
