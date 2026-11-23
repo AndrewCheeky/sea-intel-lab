@@ -272,11 +272,12 @@
   const SHARE_TXT = {research: 'Research (private)', crew: 'Crew', bank: 'Tournament Mode', all: 'Everything'};
   const TYPE_TXT = {private: 'Private / recreational', charter: 'Sports charter', commercial: 'Commercial / artisanal'};
   function showBoatType() {
-    const t = store.get('sil.btype', ''), cap = !!capCode();
-    $('typeRow').hidden = !store.get(CODE, '');
-    $('typeNow').textContent = t ? TYPE_TXT[t] : 'Not set yet';
+    const t = store.get('sil.btype', ''), cap = !!capCode(), has = !!store.get(CODE, '');
+    $('myBoat').hidden = !has; $('leaveBtn').hidden = !has;
+    $('otherBoat').open = !has;                                   // no boat yet: show Join / Create straight away
+    $('otherSum').textContent = has ? 'Join or create a different boat' : 'Join or create a boat';
     $('typeSel').value = t || ''; $('typeSel').disabled = !cap; $('typeSave').hidden = !cap;
-    $('typeNote').textContent = cap ? (t ? '' : 'Please choose your boat type – it helps the fisheries report.') : 'Set by the captain.';
+    $('typeNote').textContent = cap ? (t ? '' : 'Please choose your boat type – it helps the fisheries report.') : (t ? 'Set by the captain.' : 'Not set yet – the captain sets this.');
   }
   async function shareCall(level) {
     const code = store.get(CODE, ''); if (!code) return null;
@@ -309,7 +310,7 @@
     $('codeIn').value = store.get(CODE, ''); $('boatIn').value = ''; $('byIn').value = ''; $('newCode').hidden = true; $('dupMsg').hidden = true;
     $('codeNow').textContent = store.get(CODE, '') ? `This phone uses ${store.get('sil.boat', '') || 'a boat code'} (${store.get(CODE, '')})${capCode() ? ' as captain' : ''}.` : 'No boat code on this phone yet.';
     $('capRow').hidden = !store.get(CODE, '') || !!capCode();
-    $('typePick').querySelectorAll('input').forEach(r => r.checked = false);
+    $('newType').value = '';
     showBoatType();
     $('codeDlg').showModal();
   }
@@ -327,7 +328,7 @@
     $('codeDlg').close(); toast(`Joined ${j.boat}`); store.set('sil.btype', j.boatType || ''); useCode(code, j.boat, j.share);
   });
   $('createBtn').addEventListener('click', async () => {
-    const name = $('boatIn').value.trim(), by = $('byIn').value.trim(), picked = $('typePick').querySelector('input:checked'), type = picked ? picked.value : '';
+    const name = $('boatIn').value.trim(), by = $('byIn').value.trim(), type = $('newType').value;
     if (name.length < 2) return toast('Type your boat name'); if (by.length < 2) return toast('Type your name'); if (!type) return toast('Choose the boat type');
     let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'create', name, by, type})}`, {cache: 'no-store'})).json(); } catch {}
     if (!j) return toast('No signal – try again when connected');

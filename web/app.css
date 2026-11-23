@@ -98,4 +98,5 @@ dialog input,dialog select{display:block;width:100%;margin-top:4px;min-height:44
 .bigCode.cap{font-size:20px;color:#ffd166}
 .shareOpts button:disabled{opacity:.45}
 .codeRow select{flex:1;min-width:0;min-height:40px;border:1px solid var(--line);border-radius:9px;background:#0b2a4c;color:var(--ink);padding:0 8px;font:600 14px inherit}
-#typePick{flex-direction:column;gap:6px}
+#otherBoat{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+#otherBoat summary{cursor:pointer;color:var(--accent);font-weight:700;font-size:14px;padding:6px 0;min-height:32px}
