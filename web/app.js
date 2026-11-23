@@ -384,14 +384,14 @@
       : `Collecting. ${t.snapshots} grid${t.snapshots === 1 ? '' : 's'} saved so far; logs made from now on will be scored against them.` +
         (t.not_scored ? ` ${t.not_scored} earlier log${t.not_scored > 1 ? 's' : ''} not counted.` : '');
     $('trackList').innerHTML = t.entries.slice(-12).reverse().map(e =>
-      `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count}${e.region ? ' · ' + esc(e.region) : ''} · ` +
+      `<li>${esc(new Date(e.date).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'}))} · ${esc(e.species)} × ${e.count}${e.wt ? ' · ~' + esc(e.wt) + ' lb' : ''}${e.region ? ' · ' + esc(e.region) : ''} · ` +
       (e.scored ? `<b>${esc(e.cls)}</b>${e.cls_no_temp && e.cls_no_temp !== e.cls ? ` <span class="small">(without temperature: ${esc(e.cls_no_temp)})</span>` : ''}` : 'not counted') + '</li>').join('');
   }
   $('trackBtn').addEventListener('click', () => { sheet($('trackBtn'), $('track')); loadTrack(); });
 
   $('sendLogs').addEventListener('click', async () => {
     const logs = boatLogs(); if (!logs.length) return toast('No logs yet');
-    const text = 'Strike grid logs\n' + logs.map(l => `${l.time} | ${l.species} x${l.count} | ${l.lat}, ${l.lon}${l.exact ? '' : ' (map centre)'}${l.note ? ' | ' + l.note : ''}`).join('\n');
+    const text = 'Strike grid logs\n' + logs.map(l => `${l.time} | ${l.species} x${l.count}${l.wt ? ' | ~' + l.wt + ' lb' : ''} | ${l.lat}, ${l.lon}${l.exact ? '' : ' (map centre)'}${l.note ? ' | ' + l.note : ''}`).join('\n');
     try { if (navigator.share) { await navigator.share({title: 'Strike grid logs', text}); return; } } catch (e) { if (e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(text); toast('Copied – paste it in a message'); } catch { prompt('Copy your logs:', text); }
   });
