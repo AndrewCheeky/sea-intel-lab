@@ -355,6 +355,10 @@
           `High+ ${t.comparison.with_temp.strikes_high_plus} vs ${t.comparison.without_temp.strikes_high_plus} · ` +
           `Good+ ${t.comparison.with_temp.strikes_good_plus} vs ${t.comparison.without_temp.strikes_good_plus}` +
           (t.comparison.quiet ? ` · quiet logs in low squares ${t.comparison.with_temp.quiet_below_good} vs ${t.comparison.without_temp.quiet_below_good}` : '') + '</span>' : '') +
+        (t.booster && t.booster.strikes ? `<br><span class="small"><b>Now vs drop-off as a booster</b> (${t.booster.strikes} strike${t.booster.strikes > 1 ? 's' : ''}): ` +
+          `High+ ${t.booster.now.strikes_high_plus} vs ${t.booster.booster.strikes_high_plus} · ` +
+          `Good+ ${t.booster.now.strikes_good_plus} vs ${t.booster.booster.strikes_good_plus}` +
+          (t.booster.quiet ? ` · quiet logs in low squares ${t.booster.now.quiet_below_good} vs ${t.booster.booster.quiet_below_good}` : '') + '</span>' : '') +
         (t.by_region ? '<br><span class="small">' + Object.entries(t.by_region).filter(([, r]) => r.scored).map(([k, r]) => `${esc(k)}: ${r.high_plus} of ${r.scored}`).join(' · ') + '</span>' : '')
       : `Collecting. ${t.snapshots} grid${t.snapshots === 1 ? '' : 's'} saved so far; logs made from now on will be scored against them.` +
         (t.not_scored ? ` ${t.not_scored} earlier log${t.not_scored > 1 ? 's' : ''} not counted.` : '');
