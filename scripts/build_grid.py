@@ -729,6 +729,7 @@ def track_record(logs):
         before = [s for s in snaps if s['t'] < r['when'] and (r['when'] - s['t']).total_seconds() < 36 * 3600]
         e = dict(date=r['when'].strftime('%Y-%m-%dT%H:%MZ'), species=r['species'], count=r['count'], strike=is_strike(r), region=region_of(r['lat'], r['lon']),
                  public=shared_exact(r) or shared_bank(r))
+        if r.get('wt'): e['wt'] = r['wt']
         if not before:
             e['scored'] = False; entries.append(e); continue
         s = before[-1]; A = s['area']
