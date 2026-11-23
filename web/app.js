@@ -273,7 +273,7 @@
   const TYPE_TXT = {private: 'Private / recreational', charter: 'Sports charter', commercial: 'Commercial / artisanal'};
   function showBoatType() {
     const t = store.get('sil.btype', ''), cap = !!capCode(), has = !!store.get(CODE, '');
-    $('myBoat').hidden = !has;
+    $('myBoat').hidden = !has; $('leaveBtn').hidden = !has;
     $('otherBoat').open = !has;                                   // no boat yet: show Join / Create straight away
     $('otherSum').textContent = has ? 'Join or create a different boat' : 'Join or create a boat';
     $('typeSel').value = t || ''; $('typeSel').disabled = !cap; $('typeSave').hidden = !cap;
