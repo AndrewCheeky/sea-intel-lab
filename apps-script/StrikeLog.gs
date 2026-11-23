@@ -31,7 +31,7 @@
 
 const STRIKELOG = {
   SHEET_NAME: 'Strike grid logs',
-  HEADER: ['Received (UTC)', 'Logged at (phone)', 'Lat', 'Lon', 'Species', 'Count', 'Note', 'Exact GPS', 'Id', 'Boat', 'Phone'],
+  HEADER: ['Received (UTC)', 'Logged at (phone)', 'Lat', 'Lon', 'Species', 'Count', 'Note', 'Exact GPS', 'Id', 'Boat', 'Phone', 'Approx weight (lb)'],
   BOATS_HEADER: ['Boat', 'Code', 'Sharing', 'Changed', 'Created by', 'Captain code', 'Boat type'],
   TYPES: ['private', 'charter', 'commercial'],            // as the NFA licences them: recreational / sports charter / artisanal
   SHARES: ['research', 'crew', 'bank', 'all'],
@@ -67,6 +67,8 @@ function strikeLogRoute_(e) {
   const B = STRIKELOG.BOX;
   if (!(lat > B.south && lat < B.north && lon > B.west && lon < B.east)) return json({ok: false, error: 'position outside the area'});
   if (!(count >= 0 && count <= 50)) return json({ok: false, error: 'bad count'});
+  let wt = '';
+  if (q.wt !== undefined && String(q.wt) !== '') { wt = Math.round(Number(q.wt) * 10) / 10; if (!(wt > 0 && wt <= 20000)) return json({ok: false, error: 'weight must be 0–20,000 lb'}); }
   const species = STRIKELOG.SPECIES.indexOf(String(q.species)) >= 0 ? String(q.species) : 'Other';
   const note = String(q.note || '').replace(/[\u0000-\u001f<>]/g, ' ').slice(0, 120);
   const id = String(q.id || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 40);
@@ -86,7 +88,7 @@ function strikeLogRoute_(e) {
     if (n >= STRIKELOG.MAX_PER_DAY) return json({ok: false, error: 'daily limit reached'});
     props.setProperty('STRIKELOG_N_' + today, String(n + 1));
     sh.appendRow([new Date().toISOString(), when.toISOString(), Math.round(lat * 1e5) / 1e5, Math.round(lon * 1e5) / 1e5,
-                  species, count, note, q.exact === '1' ? 'yes' : 'no', id, boat.name, String(q.dev || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 40)]);
+                  species, count, note, q.exact === '1' ? 'yes' : 'no', id, boat.name, String(q.dev || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 40), wt]);
   } finally {
     lock.releaseLock();
   }
@@ -204,7 +206,7 @@ function strikeLogDelete_(props, q, boat, isCaptain) {
 function strikeLogTeam_(props, boat) {
   const since = Date.now() - 14 * 86400000;
   return strikeLogRows_(props).filter(r => r.boat === boat.name && Date.parse(r.date) >= since)
-    .map(r => ({id: r.id, date: r.date, lat: r.lat, lon: r.lon, species: r.species, count: r.count, note: r.note}));
+    .map(r => ({id: r.id, date: r.date, lat: r.lat, lon: r.lon, species: r.species, count: r.count, note: r.note, wt: r.wt}));
 }
 
 function strikeLogRows_(props) {
@@ -216,7 +218,7 @@ function strikeLogRows_(props) {
     date: r[1] instanceof Date ? r[1].toISOString() : String(r[1]),
     lat: Number(r[2]), lon: Number(r[3]), species: String(r[4]), count: Number(r[5]),
     note: String(r[6] || ''), exact: r[7] === 'yes', id: String(r[8] || ''),
-    boat: String(r[9] || ''), share: share[String(r[9] || '')] || 'research', boatType: btype[String(r[9] || '')] || ''}));     // unknown or unset → private
+    boat: String(r[9] || ''), wt: r[11] === '' || r[11] == null ? null : Number(r[11]), share: share[String(r[9] || '')] || 'research', boatType: btype[String(r[9] || '')] || ''}));     // unknown or unset → private
 }
 
 function strikeLogSheet_(props) {
@@ -232,6 +234,8 @@ function strikeLogSheet_(props) {
   }
   const logs = ss.getSheetByName('Logs') || ss.getSheets()[0];
   if (!logs.getRange(1, 10).getValue()) logs.getRange(1, 10).setValue('Boat').setFontWeight('bold');   // older sheets
+  if (!logs.getRange(1, 11).getValue()) logs.getRange(1, 11).setValue('Phone').setFontWeight('bold');
+  if (!logs.getRange(1, 12).getValue()) logs.getRange(1, 12).setValue('Approx weight (lb)').setFontWeight('bold');
   return logs;
 }
 

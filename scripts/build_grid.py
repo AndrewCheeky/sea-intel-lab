@@ -245,6 +245,8 @@ def read_logs():
         try:
             r['when'] = parse_time(r['date']); r['lat'] = float(r['lat']); r['lon'] = float(r['lon'])
             r['count'] = int(r.get('count', 1)); r['species'] = r.get('species', 'Other')
+            try: r['wt'] = float(r['wt']) if r.get('wt') not in (None, '') else None
+            except (TypeError, ValueError): r['wt'] = None
             note = str(r.get('note') or '')
             if note.startswith('[seen] ') and note[7:] in SIGHTINGS: r['species'] = note[7:]   # sightings sent to an older sheet script
         except Exception as e:
@@ -514,7 +516,7 @@ def main():
         la, lo, bank = public_pos(r)
         if la is None: continue
         e = {'date': r['when'].strftime('%Y-%m-%dT%H:%MZ'), 'lat': la, 'lon': lo,
-             'note': f"{r['species']}{' × ' + str(r['count']) if r['count'] > 1 else ''}" + (f" · {outcome_of(r)}" if outcome_of(r) else '')}
+             'note': f"{r['species']}{' × ' + str(r['count']) if r['count'] > 1 else ''}" + (f" · ~{r['wt']:g} lb" if r.get('wt') else '') + (f" · {outcome_of(r)}" if outcome_of(r) else '')}
         if bank: e['bank'] = bank
         if r.get('boat'): e['boat'] = r['boat']
         if r.get('id'): e['id'] = r['id']

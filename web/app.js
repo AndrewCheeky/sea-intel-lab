@@ -183,7 +183,7 @@
     logs.forEach(l => {
       if (SIGHT.includes(l.species)) return;                         // sightings have their own symbol
       mineKeys.add(logKey(l.time, l.lat));
-      const pop = `<b>${esc(l.species)}${l.count > 1 ? ' × ' + l.count : ''}</b>${outcomeOf(l.note) ? ' · ' + esc(outcomeOf(l.note)) : ''}${store.get('sil.boat', '') ? `<br>${esc(store.get('sil.boat', ''))}` : ''}<br>${new Date(l.time).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(l.lat, l.lon)}` +
+      const pop = `<b>${esc(l.species)}${l.count > 1 ? ' × ' + l.count : ''}</b>${l.wt ? ' · ~' + l.wt + ' lb' : ''}${outcomeOf(l.note) ? ' · ' + esc(outcomeOf(l.note)) : ''}${store.get('sil.boat', '') ? `<br>${esc(store.get('sil.boat', ''))}` : ''}<br>${new Date(l.time).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(l.lat, l.lon)}` +
         `${noteText(l.note) ? '<br>' + esc(noteText(l.note)) : ''}<br><small>${l.synced ? 'Sent ✓' : 'Waiting to send'}</small>${delBtn(l)}`;
       (l.count === 0 || l.species === 'No strikes here'
         ? L.circleMarker([l.lat, l.lon], {pane: 'pins', renderer: pinRenderer, radius: 6, color: '#061b33', weight: 2, fillColor: '#9aa5b1', fillOpacity: 1})
@@ -194,7 +194,7 @@
       if (SIGHT.includes(r.species) || mineIds.has(r.id) || hidden.has('id:' + r.id) || r.count === 0 || r.species === 'No strikes here') continue;
       mineIds.add(r.id); mineKeys.add(logKey(r.date, r.lat));
       L.marker([r.lat, r.lon], {icon: star(isToday(r.date) ? '#2ee66b' : '#3a86ff'), zIndexOffset: 680})
-        .bindPopup(`<b>${esc(r.species)}${r.count > 1 ? ' × ' + r.count : ''}</b>${outcomeOf(r.note) ? ' · ' + esc(outcomeOf(r.note)) : ''}<br>${esc(boatName)} <small>(crew)</small><br>` +
+        .bindPopup(`<b>${esc(r.species)}${r.count > 1 ? ' × ' + r.count : ''}</b>${r.wt ? ' · ~' + esc(r.wt) + ' lb' : ''}${outcomeOf(r.note) ? ' · ' + esc(outcomeOf(r.note)) : ''}<br>${esc(boatName)} <small>(crew)</small><br>` +
           `${new Date(r.date).toLocaleString([], {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}<br>${pos2txt(r.lat, r.lon)}${noteText(r.note) ? '<br>' + esc(noteText(r.note)) : ''}` +
           (capCode() ? `<br><button class="delLog" data-team="1" data-id="${esc(r.id)}">Delete (captain)</button>` : '')).addTo(myLayer);
     }
@@ -223,7 +223,7 @@
   $('logBtn').addEventListener('click', () => {
     if (needCode() || needGps()) return;
     pendingPos = last;
-    $('species').value = 'Blue marlin'; $('count').value = 1;
+    $('species').value = 'Blue marlin'; $('count').value = 1; $('wt').value = '';
     for (const id of ['oStrike', 'oLanded', 'oReleased']) $(id).checked = id === 'oStrike';
     $('logWhere').textContent = `At ${pos2txt(last[0], last[1])} (your boat's GPS).`;
     $('logDlg').showModal();
@@ -237,7 +237,8 @@
     const logs = store.get(LOGS, []);
     logs.push({id: newId(), code: curCode(), time: new Date().toISOString(), lat: +pendingPos[0].toFixed(5), lon: +pendingPos[1].toFixed(5), species: $('species').value,
                count: Math.max(0, parseInt($('count').value, 10) || 0), note: outcomeTag() + $('note').value.trim().slice(0, 100), exact: true, synced: false});
-    store.set(LOGS, logs); $('note').value = ''; drawMyLogs();
+    const w = parseFloat($('wt').value); if (w > 0 && w <= 20000) logs[logs.length - 1].wt = Math.round(w * 10) / 10;
+    store.set(LOGS, logs); $('note').value = ''; $('wt').value = ''; drawMyLogs();
     toast('Saved – sending when there is signal');
     sendPending();
   });
@@ -255,7 +256,7 @@
       }
       for (const l of store.get(LOGS, []).filter(x => !x.synced && x.code)) {
         if (!l.id) l.id = newId();
-        const q = new URLSearchParams({action: 'strikelog', code: l.code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0', dev: devId});
+        const q = new URLSearchParams({action: 'strikelog', code: l.code, id: l.id, time: l.time, lat: l.lat, lon: l.lon, species: l.species, count: l.count, note: l.note || '', exact: l.exact ? '1' : '0', dev: devId}); if (l.wt) q.set('wt', l.wt);
         let j = null;
         try { const r = await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'}); j = await r.json(); } catch { break; }       // no signal: try later
         const current = l.code === curCode();
