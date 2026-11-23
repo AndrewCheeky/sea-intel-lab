@@ -77,7 +77,9 @@ async def main():
         await pg.wait_for_timeout(1500)
         await pg.evaluate("document.getElementById('logBtn').click()"); await pg.wait_for_timeout(300)
         gps_ok = await pg.evaluate("document.getElementById('logDlg').open")
-        await pg.evaluate("document.getElementById('logDlg').close('cancel')")
+        wt_ok = await pg.evaluate("(() => { document.getElementById('wt').value = '250'; document.getElementById('logDlg').close('save'); const l = JSON.parse(localStorage.getItem('sil.logs') || '[]').pop(); return !!l && l.wt === 250; })()")
+        print('strike saves approx weight:', wt_ok)
+        assert wt_ok, 'weight not saved on the strike log'
         print('strike with GPS opens the form:', gps_ok)
         here = await pg.inner_text('#here'); best = await pg.inner_text('#best')
         await pg.screenshot(path=f'{root}/../smoke.png')
