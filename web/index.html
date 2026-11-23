@@ -7,7 +7,7 @@
 <title>Strike Grid (lab)</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-<link rel="stylesheet" href="app.css?v=21">
+<link rel="stylesheet" href="app.css?v=22">
 </head>
 <body>
 <header class="top">
@@ -115,7 +115,13 @@
     <div class="codeRow"><input id="codeIn" type="text" maxlength="12" placeholder="Code from your captain" autocapitalize="characters" autocomplete="off"><button id="joinBtn" class="primary">Join</button></div>
     <h3>Captain: create a code for your boat</h3>
     <div class="codeRow"><input id="boatIn" type="text" maxlength="40" placeholder="Boat name"></div>
-    <div class="codeRow" style="margin-top:6px"><input id="byIn" type="text" maxlength="40" placeholder="Your name"><button id="createBtn">Create</button></div>
+    <div class="codeRow" style="margin-top:6px"><input id="byIn" type="text" maxlength="40" placeholder="Your name"></div>
+    <fieldset class="outcome" id="typePick"><legend>Boat type</legend>
+      <label><input type="radio" name="btype" value="private"> Private / recreational</label>
+      <label><input type="radio" name="btype" value="charter"> Sports charter</label>
+      <label><input type="radio" name="btype" value="commercial"> Commercial / artisanal</label>
+    </fieldset>
+    <div class="codeRow"><button id="createBtn" class="primary">Create boat code</button></div>
     <p id="dupMsg" class="dupMsg" hidden></p>
     <div id="newCode" class="newCode" hidden>
       <p>Code for <b id="newBoatTxt"></b>:</p>
@@ -126,6 +132,9 @@
       <p class="bigCode cap" id="newCapTxt"></p>
       <p class="small">Sharing starts as Research (private). Change it under More → Sharing.</p>
     </div>
+    <div id="typeRow" hidden><h3>Boat type</h3>
+    <p class="small"><b id="typeNow"></b> <span id="typeNote"></span></p>
+    <div class="codeRow"><select id="typeSel" aria-label="Boat type"><option value="">Choose…</option><option value="private">Private / recreational</option><option value="charter">Sports charter</option><option value="commercial">Commercial / artisanal</option></select><button id="typeSave">Save</button></div></div>
     <div id="capRow"><h3>I'm the captain</h3>
     <div class="codeRow"><input id="capIn" type="text" maxlength="16" placeholder="Captain code" autocapitalize="characters" autocomplete="off"><button id="capBtn">Unlock</button></div></div>
     <div class="dlgBtns"><button id="leaveBtn">Remove from this phone</button><button id="codeDoneBtn" class="primary">Done</button></div>
@@ -167,6 +176,6 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="sky.js?v=2"></script>
-<script src="app.js?v=36"></script>
+<script src="app.js?v=37"></script>
 </body>
 </html>

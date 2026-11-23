@@ -8,6 +8,7 @@
  * Boat codes: each boat captain creates their boat's code in the app (More → Boat code → Create) and shares
  * it with the crew. Codes are kept in the "Boats" tab of the logs sheet (Boat | Code | Sharing | Changed | Created by).
  * Boat names must be unique: a second request for the same name is told who created it, to ask them for the code.
+ * Boat type (private / sports charter / commercial) is chosen at creation; only the captain can change it.
  * Each boat also has a CAPTAIN CODE (Boats tab, last column), shown once to the creator. Only a phone with it can
  * change the boat's sharing or delete other crew members' logs. Run fillCaptainCodes() to give older boats one.
  * Sharing is chosen by the boat in the app (and can be changed any time, e.g. off for a tournament):
@@ -31,7 +32,8 @@
 const STRIKELOG = {
   SHEET_NAME: 'Strike grid logs',
   HEADER: ['Received (UTC)', 'Logged at (phone)', 'Lat', 'Lon', 'Species', 'Count', 'Note', 'Exact GPS', 'Id', 'Boat', 'Phone'],
-  BOATS_HEADER: ['Boat', 'Code', 'Sharing', 'Changed', 'Created by', 'Captain code'],
+  BOATS_HEADER: ['Boat', 'Code', 'Sharing', 'Changed', 'Created by', 'Captain code', 'Boat type'],
+  TYPES: ['private', 'charter', 'commercial'],            // as the NFA licences them: recreational / sports charter / artisanal
   SHARES: ['research', 'crew', 'bank', 'all'],
   ABC: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',                      // no 0/O or 1/I to mix up
   SPECIES: ['Blue marlin', 'White marlin', 'Sailfish', 'Wahoo', 'Dolphin (mahi)', 'Tuna', 'No strikes here', 'Other',
@@ -50,14 +52,15 @@ function strikeLogRoute_(e) {
     if (!key || q.key !== key) return json({ok: false, error: 'not allowed'});
     return json({ok: true, logs: strikeLogRows_(props)});
   }
-  if (q.op === 'create') return json(strikeLogCreateBoat_(props, q.name, q.by));   // a captain creates their boat's code
+  if (q.op === 'create') return json(strikeLogCreateBoat_(props, q.name, q.by, q.type));   // a captain creates their boat's code
   // action=strikelog: add one log (or op=share / del=1), always with a boat code
   const boat = strikeLogBoat_(props, String(q.code || ''));
   if (!boat) return json({ok: false, error: 'wrong boat code'});
   const isCaptain = !!boat.cap && String(q.cap || '').trim().toUpperCase() === boat.cap.toUpperCase();
   if (q.op === 'share') return json(strikeLogShare_(props, boat, q.level, isCaptain));
-  if (q.op === 'captain') return json({ok: isCaptain, boat: boat.name, captain: isCaptain, share: boat.share || 'research', error: isCaptain ? undefined : 'wrong captain code'});
-  if (q.op === 'team') return json({ok: true, boat: boat.name, share: boat.share || 'research', captain: isCaptain,
+  if (q.op === 'captain') return json({ok: isCaptain, boat: boat.name, captain: isCaptain, share: boat.share || 'research', boatType: boat.type, error: isCaptain ? undefined : 'wrong captain code'});
+  if (q.op === 'boattype') return json(strikeLogBoatType_(props, boat, q.type, isCaptain));
+  if (q.op === 'team') return json({ok: true, boat: boat.name, share: boat.share || 'research', captain: isCaptain, boatType: boat.type,
                                     logs: (boat.share || 'research') === 'research' ? [] : strikeLogTeam_(props, boat)});
   if (q.del === '1') return json(strikeLogDelete_(props, q, boat, isCaptain));          // the Delete button on a log dot
   const lat = Number(q.lat), lon = Number(q.lon), count = Math.round(Number(q.count));
@@ -96,21 +99,22 @@ function strikeLogBoatsSheet_(props) {
   let sh = ss.getSheetByName('Boats');
   if (!sh) {
     sh = ss.insertSheet('Boats');
-    sh.getRange(1, 1, 1, 6).setValues([STRIKELOG.BOATS_HEADER]).setFontWeight('bold'); sh.setFrozenRows(1);
+    sh.getRange(1, 1, 1, 7).setValues([STRIKELOG.BOATS_HEADER]).setFontWeight('bold'); sh.setFrozenRows(1);
     const old = props.getProperty('STRIKELOG_CODE');
     if (old) sh.appendRow(['My boat', old, 'research', '', '', strikeLogNewCode_(10)]);
   }
   if (!sh.getRange(1, 5).getValue()) sh.getRange(1, 5).setValue('Created by').setFontWeight('bold');   // older tabs
   if (!sh.getRange(1, 6).getValue()) sh.getRange(1, 6).setValue('Captain code').setFontWeight('bold');
+  if (!sh.getRange(1, 7).getValue()) sh.getRange(1, 7).setValue('Boat type').setFontWeight('bold');
   return sh;
 }
 
 function strikeLogBoats_(props) {
   const sh = strikeLogBoatsSheet_(props), n = sh.getLastRow() - 1;
   if (n < 1) return [];
-  return sh.getRange(2, 1, n, 6).getValues().map((r, k) => ({row: k + 2, name: String(r[0]).trim(), code: String(r[1]).trim(),
+  return sh.getRange(2, 1, n, 7).getValues().map((r, k) => ({row: k + 2, name: String(r[0]).trim(), code: String(r[1]).trim(),
     share: STRIKELOG.SHARES.indexOf(String(r[2]).trim()) >= 0 ? String(r[2]).trim() : '', by: String(r[4] || '').trim(),
-    cap: String(r[5] || '').trim()})).filter(b => b.name && b.code);
+    cap: String(r[5] || '').trim(), type: STRIKELOG.TYPES.indexOf(String(r[6]).trim()) >= 0 ? String(r[6]).trim() : ''})).filter(b => b.name && b.code);
 }
 
 function strikeLogNewCode_(len) {
@@ -125,11 +129,13 @@ function strikeLogBoat_(props, code) {
 }
 
 /** A captain creates a code for their boat. Names are unique: a duplicate is told who to ask for the code. */
-function strikeLogCreateBoat_(props, name, by) {
+function strikeLogCreateBoat_(props, name, by, type) {
   const clean = v => String(v || '').replace(/[\u0000-\u001f<>"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
   name = clean(name); by = clean(by);
   if (name.length < 2) return {ok: false, error: 'enter the boat name'};
   if (by.length < 2) return {ok: false, error: 'enter your name'};
+  type = String(type || '');
+  if (STRIKELOG.TYPES.indexOf(type) < 0) return {ok: false, error: 'choose the boat type'};
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) return {ok: false, error: 'busy, try again'};
   try {
@@ -145,17 +151,26 @@ function strikeLogCreateBoat_(props, name, by) {
     let code = '';
     do { code = strikeLogNewCode_(8); } while (codes.indexOf(code) >= 0);
     const cap = strikeLogNewCode_(10);
-    strikeLogBoatsSheet_(props).appendRow([unique, code, 'research', new Date().toISOString(), by, cap]);   // default: private
+    strikeLogBoatsSheet_(props).appendRow([unique, code, 'research', new Date().toISOString(), by, cap, type]);   // default: private sharing
     props.setProperty('STRIKELOG_NEWBOATS_' + today, String(n + 1));
-    return {ok: true, boat: unique, code: code, cap: cap, share: 'research', captain: true};
+    return {ok: true, boat: unique, code: code, cap: cap, share: 'research', captain: true, boatType: type};
   } finally {
     lock.releaseLock();
   }
 }
 
 /** Read (no level) or set the boat's sharing choice (captain code needed). Applies to every phone and log of that boat. */
+/** Read or (captain only) set the boat type: private / charter / commercial. */
+function strikeLogBoatType_(props, boat, type, isCaptain) {
+  if (!type) return {ok: true, boat: boat.name, boatType: boat.type};
+  if (!isCaptain) return {ok: false, error: 'only the captain can change the boat type', boatType: boat.type};
+  if (STRIKELOG.TYPES.indexOf(String(type)) < 0) return {ok: false, error: 'bad boat type'};
+  strikeLogBoatsSheet_(props).getRange(boat.row, 7).setValue(String(type));
+  return {ok: true, boat: boat.name, boatType: String(type), captain: true};
+}
+
 function strikeLogShare_(props, boat, level, isCaptain) {
-  if (level === undefined || level === '') return {ok: true, boat: boat.name, share: boat.share || 'research', captain: isCaptain};
+  if (level === undefined || level === '') return {ok: true, boat: boat.name, share: boat.share || 'research', captain: isCaptain, boatType: boat.type};
   if (!isCaptain) return {ok: false, error: 'only the captain can change sharing', share: boat.share || 'research'};
   level = String(level);
   if (STRIKELOG.SHARES.indexOf(level) < 0) return {ok: false, error: 'bad sharing level'};
@@ -195,13 +210,13 @@ function strikeLogTeam_(props, boat) {
 function strikeLogRows_(props) {
   const sh = strikeLogSheet_(props);
   if (sh.getLastRow() < 2) return [];
-  const share = {}; strikeLogBoats_(props).forEach(b => share[b.name] = b.share || 'research');
+  const share = {}, btype = {}; strikeLogBoats_(props).forEach(b => { share[b.name] = b.share || 'research'; btype[b.name] = b.type || ''; });
   return sh.getRange(2, 1, sh.getLastRow() - 1, STRIKELOG.HEADER.length).getValues().map(r => ({
     received: r[0] instanceof Date ? r[0].toISOString() : String(r[0]),
     date: r[1] instanceof Date ? r[1].toISOString() : String(r[1]),
     lat: Number(r[2]), lon: Number(r[3]), species: String(r[4]), count: Number(r[5]),
     note: String(r[6] || ''), exact: r[7] === 'yes', id: String(r[8] || ''),
-    boat: String(r[9] || ''), share: share[String(r[9] || '')] || 'research'}));     // unknown or unset → private
+    boat: String(r[9] || ''), share: share[String(r[9] || '')] || 'research', boatType: btype[String(r[9] || '')] || ''}));     // unknown or unset → private
 }
 
 function strikeLogSheet_(props) {

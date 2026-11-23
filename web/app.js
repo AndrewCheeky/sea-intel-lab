@@ -171,10 +171,11 @@
     const code = curCode(); if (!code || !navigator.onLine) return;
     try {
       const j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'team', code, cap: capCode()})}`, {cache: 'no-store'})).json();
-      if (j && j.ok && Array.isArray(j.logs)) { store.set('sil.team', {code, logs: j.logs}); if (j.share) store.set('sil.share', j.share); drawMyLogs(); drawSightings(); }
+      if (j && j.ok && Array.isArray(j.logs)) { store.set('sil.team', {code, logs: j.logs}); if (j.share) store.set('sil.share', j.share); if ('boatType' in j) store.set('sil.btype', j.boatType || ''); drawMyLogs(); drawSightings(); }
     } catch {}
   }
-  setTimeout(loadTeam, 2500); setInterval(loadTeam, 300000); window.addEventListener('online', loadTeam);
+  setTimeout(loadTeam, 2500);
+  setTimeout(() => { if (capCode() && store.get(CODE, '') && !store.get('sil.btype', '') && !sessionStorage.getItem('typeAsked')) { sessionStorage.setItem('typeAsked', 1); toast('Captain: please set your boat type under More → Boat code'); } }, 6000); setInterval(loadTeam, 300000); window.addEventListener('online', loadTeam);
 
   function drawMyLogs() {
     myLayer.clearLayers(); const logs = boatLogs();
@@ -269,10 +270,18 @@
   setInterval(sendPending, 120000);
   // ---------- boat code and sharing (per boat: research only / general area / everything)
   const SHARE_TXT = {research: 'Research (private)', crew: 'Crew', bank: 'Tournament Mode', all: 'Everything'};
+  const TYPE_TXT = {private: 'Private / recreational', charter: 'Sports charter', commercial: 'Commercial / artisanal'};
+  function showBoatType() {
+    const t = store.get('sil.btype', ''), cap = !!capCode();
+    $('typeRow').hidden = !store.get(CODE, '');
+    $('typeNow').textContent = t ? TYPE_TXT[t] : 'Not set yet';
+    $('typeSel').value = t || ''; $('typeSel').disabled = !cap; $('typeSave').hidden = !cap;
+    $('typeNote').textContent = cap ? (t ? '' : 'Please choose your boat type – it helps the fisheries report.') : 'Set by the captain.';
+  }
   async function shareCall(level) {
     const code = store.get(CODE, ''); if (!code) return null;
     const q = new URLSearchParams({action: 'strikelog', op: 'share', code, cap: capCode()}); if (level) q.set('level', level);
-    try { const j = await (await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'})).json(); if (j && j.ok) { store.set('sil.boat', j.boat || ''); store.set('sil.share', j.share || ''); drawMyLogs(); } return j; }
+    try { const j = await (await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'})).json(); if (j && j.ok) { store.set('sil.boat', j.boat || ''); store.set('sil.share', j.share || ''); if ('boatType' in j) store.set('sil.btype', j.boatType || ''); drawMyLogs(); } return j; }
     catch { return null; }
   }
   function askSharing() {
@@ -300,6 +309,8 @@
     $('codeIn').value = store.get(CODE, ''); $('boatIn').value = ''; $('byIn').value = ''; $('newCode').hidden = true; $('dupMsg').hidden = true;
     $('codeNow').textContent = store.get(CODE, '') ? `This phone uses ${store.get('sil.boat', '') || 'a boat code'} (${store.get(CODE, '')})${capCode() ? ' as captain' : ''}.` : 'No boat code on this phone yet.';
     $('capRow').hidden = !store.get(CODE, '') || !!capCode();
+    $('typePick').querySelectorAll('input').forEach(r => r.checked = false);
+    showBoatType();
     $('codeDlg').showModal();
   }
   $('codeBtn').addEventListener('click', openCode);
@@ -313,18 +324,19 @@
     let j = null; try { j = await (await fetch(`${LOG_URL}?${q}`, {cache: 'no-store'})).json(); } catch {}
     if (!j) return toast('No signal – try again when connected');
     if (!j.ok) return toast(/code/.test(j.error || '') ? 'That boat code was not found' : 'Not saved: ' + (j.error || 'unknown'));
-    $('codeDlg').close(); toast(`Joined ${j.boat}`); useCode(code, j.boat, j.share);
+    $('codeDlg').close(); toast(`Joined ${j.boat}`); store.set('sil.btype', j.boatType || ''); useCode(code, j.boat, j.share);
   });
   $('createBtn').addEventListener('click', async () => {
-    const name = $('boatIn').value.trim(), by = $('byIn').value.trim();
-    if (name.length < 2) return toast('Type your boat name'); if (by.length < 2) return toast('Type your name');
-    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'create', name, by})}`, {cache: 'no-store'})).json(); } catch {}
+    const name = $('boatIn').value.trim(), by = $('byIn').value.trim(), picked = $('typePick').querySelector('input:checked'), type = picked ? picked.value : '';
+    if (name.length < 2) return toast('Type your boat name'); if (by.length < 2) return toast('Type your name'); if (!type) return toast('Choose the boat type');
+    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'create', name, by, type})}`, {cache: 'no-store'})).json(); } catch {}
     if (!j) return toast('No signal – try again when connected');
     if (j.duplicate) { $('dupMsg').textContent = j.error; $('dupMsg').hidden = false; return; }
     if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Creating codes needs the updated logging script (StrikeLog.gs)' : 'Not created: ' + (j.error || 'unknown'));
     $('dupMsg').hidden = true;
     $('newCodeTxt').textContent = j.code; $('newBoatTxt').textContent = j.boat; $('newCapTxt').textContent = j.cap || '–'; $('newCode').hidden = false;
     if (j.cap) setCap(j.code.toUpperCase(), j.cap);
+    store.set('sil.btype', j.boatType || type);
     store.set(CODE, j.code); store.set('sil.boat', j.boat); store.set('sil.share', j.share || 'research'); drawMyLogs(); drawSightings();
   });
   $('shareCodeBtn').addEventListener('click', async () => {
@@ -332,14 +344,21 @@
     try { if (navigator.share) await navigator.share({text}); else { await navigator.clipboard.writeText(text); toast('Copied – paste it to your crew'); } } catch {}
   });
   $('codeDoneBtn').addEventListener('click', () => { $('codeDlg').close(); });
+  $('typeSave').addEventListener('click', async () => {
+    const type = $('typeSel').value; if (!type) return toast('Choose the boat type');
+    let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'boattype', code: curCode(), cap: capCode(), type})}`, {cache: 'no-store'})).json(); } catch {}
+    if (!j) return toast('No signal – try again when connected');
+    if (!j.ok) return toast(/position|count/.test(j.error || '') ? 'Needs the updated logging script (StrikeLog.gs)' : 'Not saved: ' + (j.error || 'unknown'));
+    store.set('sil.btype', j.boatType); showBoatType(); toast(`Boat type: ${TYPE_TXT[j.boatType]}`);
+  });
   $('capBtn').addEventListener('click', async () => {
     const cap = $('capIn').value.trim().toUpperCase(); if (!curCode()) return toast('Join your boat first'); if (!cap) return toast('Type the captain code');
     let j = null; try { j = await (await fetch(`${LOG_URL}?${new URLSearchParams({action: 'strikelog', op: 'captain', code: curCode(), cap})}`, {cache: 'no-store'})).json(); } catch {}
     if (!j) return toast('No signal – try again when connected');
     if (!j.captain) return toast('That captain code is not right for this boat');
-    setCap(curCode(), cap); $('capIn').value = ''; toast(`Captain controls on for ${j.boat}`); drawMyLogs(); drawSightings(); openCode();
+    setCap(curCode(), cap); $('capIn').value = ''; store.set('sil.btype', j.boatType || ''); toast(`Captain controls on for ${j.boat}`); drawMyLogs(); drawSightings(); openCode();
   });
-  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; setCap(curCode(), ''); store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); drawMyLogs(); drawSightings(); $('codeDlg').close(); });;
+  $('leaveBtn').addEventListener('click', () => { if (!confirm('Remove the boat code from this phone? Logs will stop until a code is entered.')) return; setCap(curCode(), ''); store.set(CODE, ''); store.set('sil.boat', ''); store.set('sil.share', ''); store.set('sil.btype', ''); drawMyLogs(); drawSightings(); $('codeDlg').close(); });;
 
   // ---------- track record
   async function loadTrack() {
