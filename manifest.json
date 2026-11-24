@@ -1,0 +1,106 @@
+[
+ {
+  "name": "01-open",
+  "caption": "Open the lab: today\u2019s fishing picture for Jamaican waters, by area.",
+  "tap": [
+   302.5,
+   39.4
+  ],
+  "hold": 3.6,
+  "new": false
+ },
+ {
+  "name": "02-plan",
+  "caption": "Today\u2019s plan: the best spot, the best time and the sea at that time.",
+  "tap": [
+   216.0,
+   157.3
+  ],
+  "hold": 3.8,
+  "new": false
+ },
+ {
+  "name": "03-conf",
+  "caption": "Tap the Picture badge to see how sure the map is in each area, and why.",
+  "tap": [
+   138.9,
+   172.8
+  ],
+  "hold": 4.0,
+  "new": true
+ },
+ {
+  "name": "04-times",
+  "caption": "Major and minor feeding times for the whole island. Only what\u2019s coming up is shown.",
+  "tap": [
+   256.0,
+   102.8
+  ],
+  "hold": 4.0,
+  "new": true
+ },
+ {
+  "name": "05-bank",
+  "caption": "Tap a red dot for that bank\u2019s wind, seas and current.",
+  "tap": [
+   191.0,
+   503.796875
+  ],
+  "hold": 3.8,
+  "new": true
+ },
+ {
+  "name": "06-layers",
+  "caption": "Arrows show which way the current runs. Green marks are weed seen by satellite.",
+  "tap": null,
+  "hold": 4.0,
+  "new": true
+ },
+ {
+  "name": "07-create",
+  "caption": "Captains create the boat code: boat name, your name and boat type. Crew join with it.",
+  "tap": [
+   101.1,
+   583.9
+  ],
+  "hold": 4.2,
+  "new": true
+ },
+ {
+  "name": "08-share",
+  "caption": "Only the captain picks who sees catches. Research, the default, never shares a spot.",
+  "tap": null,
+  "hold": 4.4,
+  "new": true
+ },
+ {
+  "name": "09-strike",
+  "caption": "Hooked up? Tap Strike, tick what happened and add an approx weight. Needs your boat code and GPS.",
+  "tap": [
+   216.0,
+   735.0
+  ],
+  "hold": 4.6,
+  "new": true
+ },
+ {
+  "name": "10-star",
+  "caption": "Your strikes show as stars, with the weight. Logged by mistake? Delete it.",
+  "tap": [
+   289.0,
+   403.5677185058594
+  ],
+  "hold": 4.0,
+  "new": true
+ },
+ {
+  "name": "11-track",
+  "caption": "Track record: how often strikes landed in the map\u2019s hot spots. Every log tests it.",
+  "tap": [
+   216.0,
+   522.0
+  ],
+  "hold": 4.4,
+  "new": true
+ }
+]
