@@ -1,0 +1,31 @@
+name: Capture how-to video frames
+on:
+  push:
+    branches: [video-capture]
+permissions:
+  contents: write
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install numpy scipy pillow matplotlib playwright >/dev/null && python -m playwright install --with-deps chromium >/dev/null
+      - run: |
+          git fetch --depth 1 origin history && git worktree add history FETCH_HEAD || true
+          mkdir -p cache && cp history/depth/* cache/ 2>/dev/null || true
+      - run: python scripts/build_grid.py
+        env:
+          STRIKELOG_URL: ${{ secrets.STRIKELOG_URL }}
+          STRIKELOG_KEY: ${{ secrets.STRIKELOG_KEY }}
+          SOURCE_SITE: 'https://andrewcheeky.github.io/jamaica-marine-currents/'
+      - run: |
+          cp web/* site/ && mkdir -p site/vendor/leaflet tmp && (cd tmp && npm pack leaflet@1.9.4 --silent && tar xzf leaflet-1.9.4.tgz)
+          cp -r tmp/package/dist/leaflet.js tmp/package/dist/leaflet.css tmp/package/dist/images site/vendor/leaflet/
+          python scripts/capture_video2.py site out
+      - run: |
+          cd out && git init -q -b video-frames && git add -A
+          git -c user.name=AndrewCheeky -c user.email=noreply@github.com commit -qm "How-to video frames (temporary)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" video-frames
